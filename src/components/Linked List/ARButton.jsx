@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Lock, Unlock } from "lucide-react";
+import ARPage1 from "./ARPage1";
 
 const ARButton = () => {
-  const [isSupported, setIsSupported] = useState(null); // null = checking
+  const [isSupported, setIsSupported] = useState(null);
+  const [startAR, setStartAR] = useState(false);
 
   useEffect(() => {
     const checkARSupport = async () => {
@@ -22,6 +24,11 @@ const ARButton = () => {
     checkARSupport();
   }, []);
 
+  // kung nag-start na si AR → render ARPage1
+  if (startAR) {
+    return <ARPage1 />;
+  }
+
   if (isSupported === null) {
     return (
       <button
@@ -37,6 +44,7 @@ const ARButton = () => {
   return (
     <button
       disabled={!isSupported}
+      onClick={() => setStartAR(true)}
       className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium shadow-sm transition 
         ${
           isSupported
