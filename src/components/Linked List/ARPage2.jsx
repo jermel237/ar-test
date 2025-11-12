@@ -1,361 +1,310 @@
-import React, { useRef, useState, useMemo, useEffect } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import React, {
+  useMemo,
+  useState,
+  useRef,
+  useEffect,
+  forwardRef,
+  useCallback,
+} from "react";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
 
-const ARPage2 = ({
-  nodes = [10, 20, 30],
-  stepDuration = 2000,
-  spacing = 6.3,
-}) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [instruction, setInstruction] = useState("Starting at Head");
-  const [placed, setPlaced] = useState(false);
+/**
+ * ARPage2
+ * - AR-enabled version of VisualPage2 (singly linked list traversal)
+ * - Auto-starts immersive-ar session if supported
+ * - Supports AR "select" events via raycasting against node groups
+ * - Also works with normal clicks (OrbitControls fallback)
+ */
+const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  // compute node positions like VisualPage2
+  const positions = useMemo(() => {
+    const mid = (nodes.length - 1) / 2;
+    return nodes.map((_, i) => [(i - mid) * spacing, 0, 0]);
+  }, [nodes, spacing]);
+
+  // refs to node groups for AR raycast
+  const nodeRefs = useRef([]);
+  const addNodeRef = (r) => {
+    if (r && !nodeRefs.current.includes(r)) nodeRefs.current.push(r);
+  };
+
+  // store timers for traversal animation so we can clear them
+  const traversalTimers = useRef([]);
 
   useEffect(() => {
-    if (!placed) return;
+    return () => {
+      // cleanup traversal timers on unmount
+      traversalTimers.current.forEach((t) => clearTimeout(t));
+      traversalTimers.current = [];
+    };
+  }, []);
 
-    const timer = setTimeout(() => {
-      if (currentIndex < nodes.length) {
-        setCurrentIndex(currentIndex + 1);
-        if (currentIndex + 1 < nodes.length) {
-          setInstruction(`Move to next node: ${nodes[currentIndex + 1]}`);
-        } else {
-          setInstruction("Reached Tail → NULL");
-        }
-      } else {
-        setInstruction("Reached NULL, restarting...");
-        setTimeout(() => {
-          setCurrentIndex(0);
-          setInstruction("Starting at Head");
-        }, stepDuration);
-      }
-    }, stepDuration);
+  // traversal animation: highlight nodes from 0 to targetIndex
+  const animateTraversal = useCallback(
+    (targetIndex, stepMs = 500, onComplete) => {
+      traversalTimers.current.forEach((t) => clearTimeout(t));
+      traversalTimers.current = [];
 
-    return () => clearTimeout(timer);
-  }, [currentIndex, nodes, stepDuration, placed]);
+      // start from 0
+      setHighlightedIndex(-1);
+      let idx = 0;
+
+      const schedule = () => {
+        const t = setTimeout(() => {
+          setHighlightedIndex(idx);
+          idx++;
+          if (idx <= targetIndex) {
+            schedule();
+          } else {
+            if (typeof onComplete === "function") onComplete();
+          }
+        }, stepMs);
+        traversalTimers.current.push(t);
+      };
+
+      // start immediately for index 0 (so first highlight shows quickly)
+      schedule();
+    },
+    []
+  );
+
+  // generate pseudo code (same style as VisualPage2)
+  const generateCode = (index, value) =>
+    [
+      "📘 Pseudo Code Example:",
+      "",
+      "Head -> Node1 -> Node2 -> ... -> null",
+      `index = ${index}`,
+      "",
+      "currentNode = Head",
+      `for i in range(0, index):`,
+      "    currentNode = currentNode.next",
+      "print('Accessed Node:', currentNode.value)",
+      "",
+      `// Result: ${value}`,
+    ].join("\n");
+
+  // Auto-start AR session if available
+  const startAR = (gl) => {
+    if (navigator.xr && navigator.xr.isSessionSupported) {
+      navigator.xr
+        .isSessionSupported("immersive-ar")
+        .then((supported) => {
+          if (supported) {
+            return navigator.xr.requestSession("immersive-ar", {
+              requiredFeatures: ["hit-test", "local-floor"],
+            });
+          } else {
+            // not supported; silently ignore (OrbitControls will still work)
+            return null;
+          }
+        })
+        .then((session) => {
+          if (session) {
+            gl.xr.setSession(session);
+          }
+        })
+        .catch((err) => {
+          console.warn("AR session start failed:", err);
+        });
+    }
+  };
 
   return (
-    <div className="w-full h-screen">
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 text-xl font-bold z-50">
-        {instruction}
-      </div>
+    <div className="w-full h-[300px]">
       <Canvas
         camera={{ position: [0, 5, 18], fov: 50 }}
-        gl={{ alpha: true }}
-        shadows
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
-
-          if (navigator.xr) {
-            navigator.xr
-              .requestSession("immersive-ar", {
-                requiredFeatures: ["hit-test", "local-floor"],
-              })
-              .then((session) => gl.xr.setSession(session))
-              .catch((err) =>
-                console.error("❌ Failed to start AR session:", err)
-              );
-          }
+          startAR(gl);
         }}
       >
         <ambientLight intensity={0.4} />
-        <directionalLight position={[5, 10, 5]} intensity={0.8} castShadow />
+        <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        <Reticle placed={placed} setPlaced={setPlaced}>
-          <group>
-            {/* AR Instruction Text at the top */}
-            {placed && (
-              <Text
-                position={[0, 6, 0]} // high above nodes
-                fontSize={0.7}
-                color="yellow"
-                anchorX="center"
-                anchorY="middle"
-              >
-                {instruction}
-              </Text>
-            )}
+        <group position={[0, 0, -8]}>
+          <FadeText
+            text="Singly Linked List Overview"
+            position={[0, 4, -2]}
+            fontSize={0.6}
+            color="#facc15"
+          />
+          <FadeText
+            text="Tap a node to view its value and pseudo code"
+            position={[0, 3.2, -2]}
+            fontSize={0.35}
+            color="white"
+          />
 
-            {/* The node scene */}
-            <Scene
-              nodes={nodes}
-              spacing={spacing}
-              currentIndex={currentIndex}
+          {nodes.map((val, i) => (
+            <Node3D
+              key={i}
+              index={i}
+              value={val}
+              position={positions[i]}
+              isLast={i === nodes.length - 1}
+              selected={selectedNode === i}
+              highlighted={i <= highlightedIndex}
+              onClick={() => {
+                // on normal click (non-AR), animate traversal and set selectedNode after traversal
+                animateTraversal(i, 500, () =>
+                  setSelectedNode((prev) => (prev === i ? null : i))
+                );
+              }}
+              ref={(r) => addNodeRef(r)}
             />
+          ))}
 
-            {/* Shadow plane */}
-            <mesh rotation-x={-Math.PI / 2} receiveShadow>
-              <planeGeometry args={[20, 20]} />
-              <shadowMaterial opacity={0.3} />
-            </mesh>
-          </group>
-        </Reticle>
+          {selectedNode !== null && (
+            <group position={[positions[positions.length - 1][0] + 8, 1, 0]}>
+              <FadeText
+                text={generateCode(selectedNode, nodes[selectedNode])}
+                fontSize={0.3}
+                color="#c7d2fe"
+              />
+            </group>
+          )}
+        </group>
+
+        {/* AR raycast interaction manager */}
+        <ARInteractionManager
+          nodeRefs={nodeRefs}
+          setSelectedNode={(idx) => {
+            // when AR select happens, run traversal animation then update selected
+            if (idx === null || idx === undefined) return;
+            animateTraversal(idx, 500, () =>
+              setSelectedNode((prev) => (prev === idx ? null : idx))
+            );
+          }}
+          setHighlightedIndex={setHighlightedIndex}
+        />
       </Canvas>
     </div>
   );
 };
 
-function Reticle({ children, placed, setPlaced }) {
+/* AR Interaction Manager:
+   - Listens for XR 'select' events when session starts and uses raycasting
+   - Raycasts from the XR camera forward vector to intersect node groups
+*/
+const ARInteractionManager = ({ nodeRefs, setSelectedNode, setHighlightedIndex }) => {
   const { gl } = useThree();
-  const reticleRef = useRef();
-  const [hitTestSource, setHitTestSource] = useState(null);
-  const [hitTestSourceRequested, setHitTestSourceRequested] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [targetPos, setTargetPos] = useState(null);
 
-  useFrame((_, delta) => {
-    const session = gl.xr.getSession();
-    if (!session) return;
-    const frame = gl.xr.getFrame();
-    if (!frame) return;
+  useEffect(() => {
+    const onSessionStart = () => {
+      const session = gl.xr.getSession();
+      if (!session) return;
 
-    if (!hitTestSourceRequested) {
-      session.requestReferenceSpace("viewer").then((refSpace) => {
-        session
-          .requestHitTestSource({ space: refSpace })
-          .then(setHitTestSource);
-      });
-      setHitTestSourceRequested(true);
-    }
+      const onSelect = () => {
+        const xrCamera = gl.xr.getCamera();
+        const raycaster = new THREE.Raycaster();
+        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
 
-    if (hitTestSource && !placed) {
-      const referenceSpace = gl.xr.getReferenceSpace();
-      const hits = frame.getHitTestResults(hitTestSource);
+        // forward direction of camera
+        const dir = new THREE.Vector3(0, 0, -1)
+          .applyQuaternion(cam.quaternion)
+          .normalize();
+        const origin = cam.getWorldPosition(new THREE.Vector3());
+        raycaster.set(origin, dir);
 
-      if (hits.length > 0) {
-        const pose = hits[0].getPose(referenceSpace);
+        const candidates = (nodeRefs.current || [])
+          .map((group) => (group ? group.children : []))
+          .flat();
 
-        reticleRef.current.visible = true;
-        reticleRef.current.position.set(
-          pose.transform.position.x,
-          pose.transform.position.y,
-          pose.transform.position.z
-        );
-        reticleRef.current.updateMatrixWorld(true);
-
-        setProgress((prev) => {
-          const next = Math.min(prev + delta / 2, 1); // 2 sec hold
-          if (next >= 1 && !placed) {
-            setPlaced(true);
-            setTargetPos(pose.transform.position);
+        const intersects = raycaster.intersectObjects(candidates, true);
+        if (intersects.length > 0) {
+          let hit = intersects[0].object;
+          // walk up to parent that holds the userData.nodeIndex
+          while (hit && hit.userData?.nodeIndex === undefined && hit.parent) {
+            hit = hit.parent;
           }
-          return next;
-        });
-      } else {
-        reticleRef.current.visible = false;
-        setProgress(0);
-      }
-    }
-  });
+          const idx = hit?.userData?.nodeIndex;
+          if (idx !== undefined) {
+            setSelectedNode(idx);
+          }
+        }
+      };
 
-  return (
-    <group>
-      <mesh ref={reticleRef} rotation-x={-Math.PI / 2} visible={false}>
-        <ringGeometry args={[0.07, 0.1, 32]} />
-        <meshBasicMaterial color="yellow" />
-      </mesh>
+      session.addEventListener("select", onSelect);
+      const onEnd = () => session.removeEventListener("select", onSelect);
+      session.addEventListener("end", onEnd);
+    };
 
-      {reticleRef.current && !placed && (
-        <mesh position={reticleRef.current.position} rotation-x={-Math.PI / 2}>
-          <ringGeometry args={[0.05, 0.09, 32, 1, 0, Math.PI * 2 * progress]} />
-          <meshBasicMaterial color="lime" transparent opacity={0.8} />
-        </mesh>
-      )}
+    gl.xr.addEventListener("sessionstart", onSessionStart);
+    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
+  }, [gl, nodeRefs, setSelectedNode]);
 
-      {placed && targetPos && (
-        <group
-          position={[targetPos.x, targetPos.y, targetPos.z]}
-          scale={[0.1, 0.1, 0.1]}
-        >
-          {children}
-        </group>
-      )}
-    </group>
-  );
-}
-
-const Scene = ({ nodes, spacing, currentIndex }) => {
-  const mid = (nodes.length - 1) / 2;
-  return (
-    <>
-      {nodes.map((val, idx) => (
-        <Node
-          key={idx}
-          value={val}
-          position={[(idx - mid) * spacing, 0, 0]}
-          isHead={idx === 0}
-          isLast={idx === nodes.length - 1}
-          isActive={idx === currentIndex}
-          highlightNull={currentIndex === nodes.length}
-          nodeIndex={idx}
-        />
-      ))}
-    </>
-  );
+  return null;
 };
 
-// Node, Arrow3D, and NullCircle remain exactly the same as your VisualPage2
-const Node = ({
-  value,
-  position,
-  isHead,
-  isLast,
-  isActive,
-  highlightNull,
-  nodeIndex,
-}) => {
+/* Node3D component (forwardRef) - similar to VisualPage2 node
+   - attaches userData.nodeIndex to the group for AR raycast detection
+   - exposes onClick for non-AR clicks
+*/
+const Node3D = forwardRef(({ index, value, position, isLast, selected, highlighted, onClick }, ref) => {
   const size = [4.5, 2, 1];
+  const groupRef = useRef();
+
+  useEffect(() => {
+    if (groupRef.current) groupRef.current.userData = { nodeIndex: index };
+  }, [index]);
+
+  // wire both forwarded ref and internal groupRef
+  useEffect(() => {
+    if (!ref) return;
+    if (typeof ref === "function") ref(groupRef.current);
+    else if (ref) ref.current = groupRef.current;
+  }, [ref]);
+
   const boxHalf = size[0] / 2;
-  const labelGroupRef = useRef();
-  const arrowLabelRef = useRef();
-  const nullArrowRef = useRef();
-  const tailLabelRef = useRef();
-
-  useFrame(({ clock }) => {
-    if (labelGroupRef.current)
-      labelGroupRefRef.current.position.y =
-        2.2 + Math.sin(clock.getElapsedTime() * 2) * 0.2;
-    if (arrowLabelRef.current)
-      arrowLabelRef.current.position.y =
-        1.5 + Math.sin(clock.getElapsedTime() * 2) * 0.15;
-    if (nullArrowRef.current)
-      nullArrowRef.current.position.y =
-        1.5 + Math.sin(clock.getElapsedTime() * 2) * 0.15;
-    if (tailLabelRef.current)
-      tailLabelRef.current.position.y =
-        2.0 + Math.sin(clock.getElapsedTime() * 2) * 0.15;
-  });
-
-  const arrowActive = nodeIndex === undefined ? false : nodeIndex === nodeIndex;
 
   return (
-    <group position={position}>
-      {/* Node Box */}
-      <mesh>
+    <group position={position} ref={groupRef}>
+      <mesh onClick={onClick}>
         <boxGeometry args={size} />
-        <meshStandardMaterial color={isActive ? "#facc15" : "#3b82f6"} />
+        <meshStandardMaterial color={selected ? "#f87171" : highlighted ? "#fde68a" : "#60a5fa"} />
       </mesh>
 
-      {/* Divider */}
       <mesh position={[0.5, 0, 0.51]}>
         <boxGeometry args={[0.05, size[1], 0.05]} />
         <meshStandardMaterial color="white" />
       </mesh>
 
-      {/* Head Label */}
-      {isHead && (
-        <group ref={labelGroupRef}>
-          <Text fontSize={0.4} anchorX="center" anchorY="middle" color="yellow">
-            Head
-          </Text>
-          <Arrow3D start={[0, -0.1, 0]} end={[0, -1.2, 0]} color="yellow" />
-        </group>
-      )}
-
-      {/* Value & Next */}
-      <Text
-        position={[-0.8, 0, 0.55]}
-        fontSize={0.35}
-        anchorX="center"
-        anchorY="middle"
-        color="white"
-      >
+      <Text position={[-0.8, 0, 0.55]} fontSize={0.35} anchorX="center" anchorY="middle" color="white">
         {value}
       </Text>
-      <Text
-        position={[1.4, 0, 0.55]}
-        fontSize={0.35}
-        anchorX="center"
-        anchorY="middle"
-        color="white"
-      >
+
+      <Text position={[1.4, 0, 0.55]} fontSize={0.35} anchorX="center" anchorY="middle" color="white">
         Next
       </Text>
 
-      {/* Label below node */}
-      <Text
-        position={[0, -1.5, 0]}
-        fontSize={0.25}
-        anchorX="center"
-        anchorY="middle"
-        color="lightblue"
-      >
-        Node
-      </Text>
-
-      {/* Tail label */}
-      {isLast && (
-        <group ref={tailLabelRef} position={[0, 2.0, 0]}>
-          <Text
-            fontSize={0.35}
-            anchorX="center"
-            anchorY="middle"
-            color="yellow"
-          >
-            Tail Node
-          </Text>
-          <Arrow3D start={[0, -0.1, 0]} end={[0, -1.0, 0]} color="yellow" />
-        </group>
-      )}
-
-      {/* Arrows */}
       {!isLast ? (
-        <>
-          <Arrow3D
-            start={[boxHalf, 0, 0]}
-            end={[boxHalf + 1.8, 0, 0]}
-            color={arrowActive ? "#facc15" : "black"}
-          />
-          <group ref={arrowLabelRef} position={[boxHalf + 0.9, 1.5, 0]}>
-            <Text
-              fontSize={0.25}
-              anchorX="center"
-              anchorY="middle"
-              color="orange"
-            >
-              Reference to The Next Node
-            </Text>
-            <Arrow3D start={[0, -0.1, 0]} end={[0, -0.8, 0]} color="orange" />
-          </group>
-        </>
+        <Arrow3D start={[boxHalf, 0, 0]} end={[boxHalf + 1.8, 0, 0]} highlighted={highlighted} />
       ) : (
         <>
-          <Arrow3D
-            start={[boxHalf, 0, 0]}
-            end={[boxHalf + 1.2, 0, 0]}
-            color={arrowActive ? "#facc15" : "black"}
-          />
-          <NullCircle offset={boxHalf + 1.8} highlight={highlightNull} />
-          <group ref={nullArrowRef} position={[boxHalf + 1.2, 1.5, 0]}>
-            <Text
-              fontSize={0.25}
-              anchorX="center"
-              anchorY="middle"
-              color="orange"
-            >
-              Reference to NULL
-            </Text>
-            <Arrow3D start={[0, -0.1, 0]} end={[0, -0.8, 0]} color="orange" />
-          </group>
+          <Arrow3D start={[boxHalf, 0, 0]} end={[boxHalf + 1.2, 0, 0]} highlighted={highlighted} />
+          <NullCircle offset={boxHalf + 1.8} />
         </>
+      )}
+
+      {selected && (
+        <Text position={[0, size[1] + 0.2, 0]} fontSize={0.32} color="#fde68a" anchorX="center" anchorY="middle">
+          Node "{value}"
+        </Text>
       )}
     </group>
   );
-};
+});
 
-const Arrow3D = ({ start, end, color = "black" }) => {
+const Arrow3D = ({ start, end, highlighted }) => {
   const ref = useRef();
-  const dir = new THREE.Vector3(
-    end[0] - start[0],
-    end[1] - start[1],
-    end[2] - start[2]
-  ).normalize();
-  const length = new THREE.Vector3(
-    end[0] - start[0],
-    end[1] - start[1],
-    end[2] - start[2]
-  ).length();
+  const dir = new THREE.Vector3(end[0] - start[0], 0, 0).normalize();
+  const length = new THREE.Vector3(end[0] - start[0], 0, 0).length();
 
   useFrame(() => {
     if (ref.current) {
@@ -367,29 +316,57 @@ const Arrow3D = ({ start, end, color = "black" }) => {
   return (
     <primitive
       object={
-        new THREE.ArrowHelper(dir, new THREE.Vector3(...start), length, color)
+        new THREE.ArrowHelper(dir, new THREE.Vector3(...start), length, highlighted ? "yellow" : "black")
       }
       ref={ref}
     />
   );
 };
 
-const NullCircle = ({ offset, highlight }) => (
+const NullCircle = ({ offset }) => (
   <group position={[offset, 0, 0]}>
     <mesh>
       <circleGeometry args={[0.6, 32]} />
-      <meshStandardMaterial color={highlight ? "#facc15" : "red"} />
+      <meshStandardMaterial color="red" />
     </mesh>
-    <Text
-      position={[0, 0, 0.4]}
-      fontSize={0.3}
-      anchorX="center"
-      anchorY="middle"
-      color="white"
-    >
-      NULL
+    <Text position={[0, 0, 0.4]} fontSize={0.3} anchorX="center" anchorY="middle" color="white">
+      null
     </Text>
   </group>
 );
+
+/* FadeText - fade-in text identical to VisualPage2 */
+const FadeText = ({ text, fontSize = 0.5, color = "white", position = [0, 0, 0] }) => {
+  const [opacity, setOpacity] = useState(0);
+
+  useEffect(() => {
+    let frame;
+    let start;
+    const duration = 1000;
+    const animate = (ts) => {
+      if (!start) start = ts;
+      const progress = Math.min((ts - start) / duration, 1);
+      setOpacity(progress);
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return (
+    <Text
+      position={position}
+      fontSize={fontSize}
+      color={color}
+      anchorX="center"
+      anchorY="middle"
+      fillOpacity={opacity}
+      maxWidth={10}
+      textAlign="left"
+    >
+      {text}
+    </Text>
+  );
+};
 
 export default ARPage2;
