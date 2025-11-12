@@ -217,52 +217,14 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
         fontSize={0.35}
         color="#fde68a"
       />
-      {renderButton("🔍 Search", "Search (40)", 1.2)}
+      {/* ✅ fixed the action names */}
+      {renderButton("🔍 Search", "Search", 1.2)}
       {renderButton("➕ Insert", "Insert", 0.4)}
       {renderButton("❌ Delete", "Delete", -0.4)}
     </group>
   );
 };
 
-// === TREE VISUALIZATION ===
-const BSTVisualization = ({ nodes, edges, highlightNode }) => (
-  <group>
-    {edges.map(([a, b], i) => {
-      const start = nodes.find((n) => n.id === a).pos;
-      const end = nodes.find((n) => n.id === b).pos;
-      return <Connection key={i} start={start} end={end} />;
-    })}
-    {nodes.map((node) => (
-      <TreeNode
-        key={node.id}
-        position={node.pos}
-        label={node.id}
-        isHighlighted={highlightNode === node.id}
-      />
-    ))}
-  </group>
-);
-
-const TreeNode = ({ position, label, isHighlighted }) => {
-  const color = isHighlighted ? "#f87171" : "#60a5fa";
-  return (
-    <group position={position}>
-      <mesh>
-        <sphereGeometry args={[0.35, 32, 32]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <Text
-        position={[0, 0.8, 0]}
-        fontSize={0.35}
-        color="white"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {label}
-      </Text>
-    </group>
-  );
-};
 
 const Connection = ({ start, end }) => {
   const points = [new THREE.Vector3(...start), new THREE.Vector3(...end)];
