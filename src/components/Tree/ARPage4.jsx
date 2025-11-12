@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
@@ -6,12 +6,6 @@ import * as THREE from "three";
 const ARPage4 = () => {
   const [selectedOp, setSelectedOp] = useState(null);
   const [highlightNode, setHighlightNode] = useState(null);
-  const buttonRefs = useRef([]);
-
-  // collect button refs
-  const addButtonRef = (r) => {
-    if (r && !buttonRefs.current.includes(r)) buttonRefs.current.push(r);
-  };
 
   const nodes = [
     { id: 50, pos: [0, 3, -8] },
@@ -49,7 +43,7 @@ const ARPage4 = () => {
     }, 1000);
   };
 
-  // start AR automatically
+  // Start AR session automatically
   const startAR = (gl) => {
     if (navigator.xr) {
       navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
@@ -70,7 +64,7 @@ const ARPage4 = () => {
   };
 
   return (
-    <div className="w-full h-[300px]">
+    <div className="w-full h-[300px] relative">
       <Canvas
         camera={{ position: [0, 4, 25], fov: 50 }}
         onCreated={({ gl }) => {
@@ -99,86 +93,33 @@ const ARPage4 = () => {
           color="#fde68a"
         />
 
-        {/* Tree Visualization */}
+        {/* Tree */}
         <BSTVisualization
           nodes={nodes}
           edges={edges}
           highlightNode={highlightNode}
         />
 
-        {/* 3D Buttons Panel */}
-        <OperationsPanel
-          position={[-6, 1, -8]}
-          onOperation={handleOperation}
-          addButtonRef={addButtonRef}
-        />
+        {/* Buttons */}
+        <OperationsPanel position={[-6, 1, -8]} onOperation={handleOperation} />
 
         {/* Info Panel */}
         {selectedOp && (
           <OperationInfo operation={selectedOp} position={[8, 2, -8]} />
         )}
 
-        <ARInteractionManager
-          buttonRefs={buttonRefs}
-          onOperation={handleOperation}
-        />
         <OrbitControls makeDefault />
       </Canvas>
     </div>
   );
 };
 
-// === AR INTERACTION MANAGER ===
-const ARInteractionManager = ({ buttonRefs, onOperation }) => {
-  const { gl } = useThree();
-
-  useEffect(() => {
-    const onSessionStart = () => {
-      const session = gl.xr.getSession();
-      if (!session) return;
-
-      const onSelect = () => {
-        const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
-        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
-        const origin = cam.getWorldPosition(new THREE.Vector3());
-        raycaster.set(origin, dir);
-
-        const candidates = (buttonRefs.current || [])
-          .map((group) => (group ? group.children : []))
-          .flat();
-
-        const intersects = raycaster.intersectObjects(candidates, true);
-        if (intersects.length > 0) {
-          let hit = intersects[0].object;
-          while (hit && hit.userData?.action === undefined && hit.parent) {
-            hit = hit.parent;
-          }
-          const action = hit?.userData?.action;
-          if (action) onOperation(action);
-        }
-      };
-
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
-    };
-
-    gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, buttonRefs, onOperation]);
-
-  return null;
-};
-
-// === OPERATIONS PANEL ===
-const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
+// === 3D BUTTON PANEL ===
+const OperationsPanel = ({ position, onOperation }) => {
   const [activeButton, setActiveButton] = useState(null);
 
-  const handleClick = (action) => {
+  const handleClick = (e, action) => {
+    e.stopPropagation();
     setActiveButton(action);
     onOperation(action);
     setTimeout(() => setActiveButton(null), 250);
@@ -186,21 +127,24 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
 
   const renderButton = (label, action, y) => {
     const isActive = activeButton === action;
-    const color = isActive ? "#22c55e" : "#38bdf8";
+    const color = isActive ? "#22c55e" : "#38bdf8"; // Green when active
 
     return (
-      <group position={[0, y, 0]} ref={addButtonRef} userData={{ action }}>
-        <mesh onClick={() => handleClick(action)} castShadow receiveShadow>
+      <group position={[0, y, -8]}>
+        {/* Button box */}
+        <mesh onClick={(e) => handleClick(e, action)} castShadow receiveShadow>
           <boxGeometry args={[2.5, 0.6, 0.1]} />
           <meshStandardMaterial color={color} />
         </mesh>
+
+        {/* Text label */}
         <Text
           fontSize={0.35}
           color="white"
           anchorX="center"
           anchorY="middle"
           position={[0, 0, 0.06]}
-          onClick={() => handleClick(action)}
+          onClick={(e) => handleClick(e, action)}
         >
           {label}
         </Text>
@@ -217,7 +161,6 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
         fontSize={0.35}
         color="#fde68a"
       />
-      {/* ✅ fixed the action names */}
       {renderButton("🔍 Search", "Search", 1.2)}
       {renderButton("➕ Insert", "Insert", 0.4)}
       {renderButton("❌ Delete", "Delete", -0.4)}
@@ -225,7 +168,48 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   );
 };
 
+// === TREE VISUALIZATION ===
+const BSTVisualization = ({ nodes, edges, highlightNode }) => (
+  <group>
+    {edges.map(([a, b], i) => {
+      const start = nodes.find((n) => n.id === a).pos;
+      const end = nodes.find((n) => n.id === b).pos;
+      return <Connection key={i} start={start} end={end} />;
+    })}
+    {nodes.map((node) => (
+      <TreeNode
+        key={node.id}
+        position={node.pos}
+        label={node.id}
+        isHighlighted={highlightNode === node.id}
+      />
+    ))}
+  </group>
+);
 
+const TreeNode = ({ position, label, isHighlighted }) => {
+  const color = isHighlighted ? "#f87171" : "#60a5fa";
+
+  return (
+    <group position={position}>
+      <mesh>
+        <sphereGeometry args={[0.35, 32, 32]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      <Text
+        position={[0, 0.8, -8]}
+        fontSize={0.35}
+        color="#ffffff"
+        anchorX="center"
+        anchorY="middle"
+      >
+        {label}
+      </Text>
+    </group>
+  );
+};
+
+// === CONNECTION LINE ===
 const Connection = ({ start, end }) => {
   const points = [new THREE.Vector3(...start), new THREE.Vector3(...end)];
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -237,17 +221,20 @@ const Connection = ({ start, end }) => {
   );
 };
 
+// === INFO PANEL ===
 const OperationInfo = ({ operation, position }) => {
   let details = "";
-  if (operation === "Search")
+
+  if (operation === "Search") {
     details =
-      "Search: Start from root. If value < root, go left; if > root, go right.";
-  else if (operation === "Insert")
+      "Search: Start from root. If value < root, go left; if > root, go right. Repeat until found or null.";
+  } else if (operation === "Insert") {
     details =
-      "Insert: Compare with root. Traverse until empty spot, insert new node.";
-  else if (operation === "Delete")
+      "Insert: Compare with root. Traverse left/right until empty spot, then insert new node.";
+  } else if (operation === "Delete") {
     details =
-      "Delete: If leaf — remove; one child — replace; two children — inorder successor.";
+      "Delete: If leaf — remove. One child — replace. Two children — use inorder successor.";
+  }
 
   const text = `🔹 Operation: ${operation}\n${details}`;
 
@@ -262,11 +249,12 @@ const OperationInfo = ({ operation, position }) => {
   );
 };
 
-// === FADE IN TEXT ===
+// === FADE-IN TEXT ===
 const FadeInText = ({ show, text, position, fontSize, color }) => {
   const ref = useRef();
   const opacity = useRef(0);
   const scale = useRef(0.6);
+
   useFrame(() => {
     if (show) {
       opacity.current = Math.min(opacity.current + 0.05, 1);
@@ -280,6 +268,7 @@ const FadeInText = ({ show, text, position, fontSize, color }) => {
       ref.current.scale.set(scale.current, scale.current, scale.current);
     }
   });
+
   return (
     <Text
       ref={ref}
