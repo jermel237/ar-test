@@ -14,13 +14,13 @@ const ARPage4 = () => {
   };
 
   const nodes = [
-    { id: 50, pos: [0, 3, 0] },
-    { id: 30, pos: [-2, 1.5, 0] },
-    { id: 70, pos: [2, 1.5, 0] },
-    { id: 20, pos: [-3, 0, 0] },
-    { id: 40, pos: [-1, 0, 0] },
-    { id: 60, pos: [1, 0, 0] },
-    { id: 80, pos: [3, 0, 0] },
+    { id: 50, pos: [0, 3, -8] },
+    { id: 30, pos: [-2, 1.5, -8] },
+    { id: 70, pos: [2, 1.5, -8] },
+    { id: 20, pos: [-3, 0, -8] },
+    { id: 40, pos: [-1, 0, -8] },
+    { id: 60, pos: [1, 0, -8] },
+    { id: 80, pos: [3, 0, -8] },
   ];
 
   const edges = [
@@ -85,7 +85,7 @@ const ARPage4 = () => {
         <FadeInText
           show={true}
           text={"Binary Search Tree (BST)"}
-          position={[0, 5, 0]}
+          position={[0, 5, -8]}
           fontSize={0.7}
           color="white"
         />
@@ -94,7 +94,7 @@ const ARPage4 = () => {
           text={
             "Left subtree < Root < Right subtree — used for fast searching and sorting"
           }
-          position={[0, -1.5, 0]}
+          position={[0, -1.5, -8]}
           fontSize={0.35}
           color="#fde68a"
         />
@@ -108,14 +108,14 @@ const ARPage4 = () => {
 
         {/* 3D Buttons Panel */}
         <OperationsPanel
-          position={[-6, 1, 0]}
+          position={[-6, 1, -8]}
           onOperation={handleOperation}
           addButtonRef={addButtonRef}
         />
 
         {/* Info Panel */}
         {selectedOp && (
-          <OperationInfo operation={selectedOp} position={[8, 2, 0]} />
+          <OperationInfo operation={selectedOp} position={[8, 2, -8]} />
         )}
 
         <ARInteractionManager
@@ -213,11 +213,11 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
       <FadeInText
         show={true}
         text={"BST Operations:"}
-        position={[0, 2, 0]}
+        position={[0, 2, -8]}
         fontSize={0.35}
         color="#fde68a"
       />
-      {renderButton("🔍 Search", "Search", 1.2)}
+      {renderButton("🔍 Search", "Search (40)", 1.2)}
       {renderButton("➕ Insert", "Insert", 0.4)}
       {renderButton("❌ Delete", "Delete", -0.4)}
     </group>

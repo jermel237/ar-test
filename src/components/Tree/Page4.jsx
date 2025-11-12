@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Scan } from "lucide-react";
 import VisualPage4 from "./VisualPage4";
 import ARPage4 from "./ARPage4";
-import ARButton from "./ARButton";
+import ARButton4 from "./ARButton4";
 import TreePage04 from "./Contents/TreePage04";
 
 const Page4 = () => {
@@ -36,7 +36,7 @@ const Page4 = () => {
 
   return (
     <div className="bg-base-200 rounded-xl shadow-md h-[calc(82vh-6.5rem)] overflow-y-auto p-6 space-y-4 text-left">
-      <ARButton />
+      <ARButton4 />
 
       <TreePage04 />
 

@@ -13,7 +13,7 @@ const ARPage2 = () => {
     if (r && !allRefs.current.includes(r)) allRefs.current.push(r);
   };
 
-  // --- Definitions ---
+  // === Definitions ===
   const definitions = {
     matrix: [
       "📘 Adjacency Matrix:",
@@ -23,7 +23,6 @@ const ARPage2 = () => {
       "• Cons: Uses O(V²) space.",
       "",
       "📘 Pseudo Code Example:",
-      "",
       "matrix[V][V] = 0",
       "for each edge (u, v):",
       "    matrix[u][v] = 1",
@@ -49,7 +48,7 @@ const ARPage2 = () => {
     setSelected((prev) => (prev === type ? null : type));
   };
 
-  // --- Auto start AR session ---
+  // === Auto Start AR Session ===
   const startAR = (gl) => {
     if (navigator.xr) {
       navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
@@ -72,20 +71,21 @@ const ARPage2 = () => {
   return (
     <div className="w-full h-[300px]">
       <Canvas
-        camera={{ position: [0, 4, 25], fov: 50 }}
+        camera={{ position: [0, 2, 25], fov: 50 }}
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
           startAR(gl);
         }}
       >
-        <ambientLight intensity={0.5} />
+        <ambientLight intensity={0.7} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        <group position={[0, 0, -6]}>
+        {/* === Group adjusted for AR === */}
+        <group position={[0, 0, -9]} scale={[0.7, 0.7, 0.7]}>
           <FadeInText
             show={true}
             text={"Graph Representation"}
-            position={[0, 4, 0]}
+            position={[0, 4.5, 0]}
             fontSize={0.7}
             color="white"
           />
@@ -127,7 +127,7 @@ const ARPage2 = () => {
   );
 };
 
-// === AR Interaction Manager (same logic as previous file) ===
+// === AR Interaction Manager ===
 const ARInteractionManager = ({ allRefs, setSelected }) => {
   const { gl } = useThree();
 
@@ -208,7 +208,7 @@ const AdjacencyMatrix = React.forwardRef(
         />
         {boxes.map((b) => (
           <mesh key={b.key} position={b.pos} onClick={onClick}>
-            <boxGeometry args={[0.8, 0.8, 0.8]} />
+            <boxGeometry args={[0.6, 0.6, 0.6]} />
             <meshStandardMaterial
               color={b.active ? "#fa5741" : "#28438f"}
               emissive={selected && b.active ? "#facc15" : "#000"}
@@ -231,6 +231,7 @@ const AdjacencyMatrix = React.forwardRef(
 );
 
 // === Adjacency List Visualization ===
+// === Adjacency List Visualization (Updated) ===
 const AdjacencyList = React.forwardRef(
   ({ position, selected, onClick }, ref) => {
     const nodes = useMemo(
@@ -259,20 +260,27 @@ const AdjacencyList = React.forwardRef(
           fontSize={0.4}
           color="#93c5fd"
         />
+
         {nodes.map((node, i) => (
           <group key={i} position={[0, 2 - i * 1.2, 0]}>
+            {/* Main Node Box (Clickable) */}
             <mesh onClick={onClick}>
-              <sphereGeometry args={[0.35, 32, 32]} />
+              <boxGeometry args={[0.7, 0.7, 0.7]} />
               <meshStandardMaterial
                 color={selected ? "#34d399" : "#4ade80"}
                 emissive={selected ? "#facc15" : "#000"}
-                emissiveIntensity={selected ? 0.4 : 0}
+                emissiveIntensity={selected ? 0.5 : 0}
               />
             </mesh>
 
+            {/* Connected Nodes (Smaller Boxes) */}
             {node.connections.map((c, j) => (
-              <mesh key={j} position={[1.2 + j * 0.8, 0, 0]}>
-                <sphereGeometry args={[0.2, 16, 16]} />
+              <mesh
+                key={j}
+                position={[1.2 + j * 0.9, 0, 0]}
+                onClick={onClick} // make connected boxes clickable too
+              >
+                <boxGeometry args={[0.45, 0.45, 0.45]} />
                 <meshStandardMaterial color="#a5f3fc" />
               </mesh>
             ))}
@@ -288,6 +296,7 @@ const AdjacencyList = React.forwardRef(
             </Text>
           </group>
         ))}
+
         <Text
           position={[0, -2.8, 0]}
           fontSize={0.3}

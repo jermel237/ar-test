@@ -13,13 +13,13 @@ const ARPage2 = () => {
 
   // Node structure with relationships
   const nodes = [
-    { id: "A", pos: [0, 3, 0], type: "Root" },
-    { id: "B", pos: [-2, 1.5, 0], type: "Parent" },
-    { id: "C", pos: [2, 1.5, 0], type: "Parent" },
-    { id: "D", pos: [-3, 0, 0], type: "Leaf" },
-    { id: "E", pos: [-1, 0, 0], type: "Leaf" },
-    { id: "F", pos: [1, 0, 0], type: "Leaf" },
-    { id: "G", pos: [3, 0, 0], type: "Leaf" },
+    { id: "A", pos: [0, 3, -6], type: "Root" },
+    { id: "B", pos: [-2, 1.5, -6], type: "Parent" },
+    { id: "C", pos: [2, 1.5, -6], type: "Parent" },
+    { id: "D", pos: [-3, 0, -6], type: "Leaf" },
+    { id: "E", pos: [-1, 0, -6], type: "Leaf" },
+    { id: "F", pos: [1, 0, -6], type: "Leaf" },
+    { id: "G", pos: [3, 0, -6], type: "Leaf" },
   ];
 
   const edges = [
@@ -71,7 +71,7 @@ const ARPage2 = () => {
         <FadeInText
           show={true}
           text={"Basic Terminology of Trees"}
-          position={[0, 5, 0]}
+          position={[0, 5, -6]}
           fontSize={0.7}
           color="white"
         />
@@ -81,7 +81,7 @@ const ARPage2 = () => {
           text={
             "Understanding Root, Parent, Child, Sibling, Leaf, Height, and Depth"
           }
-          position={[0, 4.3, 0]}
+          position={[0, 4.3, -6]}
           fontSize={0.35}
           color="#fde68a"
         />
@@ -97,7 +97,7 @@ const ARPage2 = () => {
 
         {/* Info Panel */}
         {selectedNode && (
-          <NodeInfoPanel node={selectedNode} position={[7, 2, 0]} />
+          <NodeInfoPanel node={selectedNode} position={[7.4, 2, -6]} />
         )}
 
         {/* Handles AR click detection */}
@@ -218,7 +218,7 @@ const TreeNode = ({
         <meshStandardMaterial color={color} />
       </mesh>
       <Text
-        position={[0, 0.8, 0]}
+        position={[0, 0.6, 0]}
         fontSize={0.35}
         color="#ffffff"
         anchorX="center"
@@ -285,7 +285,7 @@ const NodeInfoPanel = ({ node, position }) => {
       show={true}
       text={content}
       position={position}
-      fontSize={0.33}
+      fontSize={0.25}
       color="#a5f3fc"
     />
   );
