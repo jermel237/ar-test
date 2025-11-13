@@ -1,251 +1,101 @@
 // ARPage4.jsx
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
 
-/**
- * ARPage4
- * - BST visualization with 3D buttons inside the Canvas
- * - Buttons are interactable in normal mode (pointer events) and in WebXR (raycast on select)
- * - Uses same ARInteractionManager pattern as your ARPage3 reference
- */
-
 const ARPage4 = () => {
-  // BST state (start with sample tree)
-  const [nodes, setNodes] = useState([
-    { id: 50, pos: [0, 3, -8] },
-    { id: 30, pos: [-2, 1.5, -8] },
-    { id: 70, pos: [2, 1.5, -8] },
-    { id: 20, pos: [-3, 0, -8] },
-    { id: 40, pos: [-1, 0, -8] },
-    { id: 60, pos: [1, 0, -8] },
-    { id: 80, pos: [3, 0, -8] },
-  ]);
-  const [edges, setEdges] = useState([
+  const [selectedOp, setSelectedOp] = useState(null);
+  const [highlightNode, setHighlightNode] = useState(null);
+  const buttonRefs = useRef([]);
+
+  const nodes = [
+    { id: 50, pos: [0, 3, 0] },
+    { id: 30, pos: [-2, 1.5, 0] },
+    { id: 70, pos: [2, 1.5, 0] },
+    { id: 20, pos: [-3, 0, 0] },
+    { id: 40, pos: [-1, 0, 0] },
+    { id: 60, pos: [1, 0, 0] },
+    { id: 80, pos: [3, 0, 0] },
+  ];
+
+  const edges = [
     [50, 30],
     [50, 70],
     [30, 20],
     [30, 40],
     [70, 60],
     [70, 80],
-  ]);
+  ];
 
-  const [selectedOp, setSelectedOp] = useState(null);
-  const [highlightNode, setHighlightNode] = useState(null);
-  const [activeButton, setActiveButton] = useState(null);
+  // handle BST operations with highlight animation
+  const handleOperation = useCallback((op) => {
+    setSelectedOp(op);
+    setHighlightNode(null);
 
-  // collect refs to 3D button groups for AR raycast
-  const buttonRefs = useRef([]);
-  const addButtonRef = (r) => {
-    if (!r) return;
-    if (!buttonRefs.current.includes(r)) buttonRefs.current.push(r);
-  };
+    let sequence = [];
+    if (op === "Search") sequence = [50, 30, 40];
+    else if (op === "Insert") sequence = [50, 70, 60, 65];
+    else if (op === "Delete") sequence = [50, 30, 40];
 
-  // clear button refs if nodes change / remount
-  useEffect(() => {
-    return () => {
-      buttonRefs.current = [];
-    };
-  }, []);
-
-  // Start AR session if supported (same pattern from your reference)
-  const startAR = (gl) => {
-    if (navigator.xr && navigator.xr.isSessionSupported) {
-      navigator.xr
-        .isSessionSupported("immersive-ar")
-        .then((supported) => {
-          if (supported) {
-            return navigator.xr.requestSession("immersive-ar", {
-              requiredFeatures: ["hit-test", "local-floor"],
-            });
-          }
-          return null;
-        })
-        .then((session) => {
-          if (session) gl.xr.setSession(session);
-        })
-        .catch((err) => {
-          console.warn("AR session start failed:", err);
-        });
-    }
-  };
-
-  // -------- BST operations: Insert/Search/Delete (Insert descends to bottom) --------
-  // helper find children edges
-  const getChildrenOf = (parentId) =>
-    edges.filter(([a]) => a === parentId).map(([, b]) => b);
-
-  // Insert that descends until empty spot and computes position
-  const insertValue = (value) => {
-    // keep IDs as numbers for comparisons
-    const v = Number(value);
-    if (nodes.some((n) => n.id === v)) {
-      setSelectedOp(`Insert (exists ${v})`);
-      setTimeout(() => setSelectedOp(null), 900);
-      return;
-    }
-
-    // if no root
-    if (nodes.length === 0) {
-      setNodes([{ id: v, pos: [0, 3, -8] }]);
-      setSelectedOp(`Insert ${v}`);
-      setTimeout(() => setSelectedOp(null), 900);
-      return;
-    }
-
-    // traverse from root
-    let currentId = nodes[0].id;
-    let parentId = null;
-    let depth = 0;
-    let parentPos = nodes.find((n) => n.id === currentId).pos.slice();
-    let xOffset = 2.5;
-
-    while (true) {
-      parentId = currentId;
-      const parentNode = nodes.find((n) => n.id === parentId);
-      parentPos = parentNode.pos.slice();
-      const children = getChildrenOf(parentId);
-      // decide left or right
-      if (v < parentId) {
-        // find left child (child < parent)
-        const leftChild = children.find((c) => c < parentId);
-        if (!leftChild) {
-          // place as left child
-          const newPos = [parentPos[0] - xOffset, parentPos[1] - 1.5, parentPos[2]];
-          setNodes((prev) => [...prev, { id: v, pos: newPos }]);
-          setEdges((prev) => [...prev, [parentId, v]]);
-          setSelectedOp(`Insert ${v}`);
-          setTimeout(() => setSelectedOp(null), 900);
-          break;
-        } else {
-          currentId = leftChild;
-        }
-      } else {
-        // right child case
-        const rightChild = children.find((c) => c > parentId);
-        if (!rightChild) {
-          const newPos = [parentPos[0] + xOffset, parentPos[1] - 1.5, parentPos[2]];
-          setNodes((prev) => [...prev, { id: v, pos: newPos }]);
-          setEdges((prev) => [...prev, [parentId, v]]);
-          setSelectedOp(`Insert ${v}`);
-          setTimeout(() => setSelectedOp(null), 900);
-          break;
-        } else {
-          currentId = rightChild;
-        }
-      }
-      // decrease horizontal offset as depth increases to avoid overlap
-      depth++;
-      xOffset *= 0.65;
-    }
-  };
-
-  // Simple search visualization: follow edges from root to value, highlight sequence
-  const visualizeSearch = (target) => {
-    const t = Number(target);
-    if (!nodes.find((n) => n.id === t)) {
-      setSelectedOp(`Search (${t}) not found`);
-      setTimeout(() => setSelectedOp(null), 1000);
-      return;
-    }
-
-    let seq = [];
-    let curr = nodes[0].id;
-    while (curr !== undefined) {
-      seq.push(curr);
-      if (curr === t) break;
-      const children = getChildrenOf(curr);
-      curr = t < curr ? children.find((c) => c < curr) : children.find((c) => c > curr);
-      if (curr === undefined) break;
-    }
-
-    setSelectedOp(`Searching ${t}`);
     let i = 0;
     const interval = setInterval(() => {
-      setHighlightNode(seq[i]);
+      setHighlightNode(sequence[i]);
       i++;
-      if (i >= seq.length) {
-        clearInterval(interval);
-        setTimeout(() => setHighlightNode(null), 700);
-        setSelectedOp(`Search ${t}`);
-        setTimeout(() => setSelectedOp(null), 900);
-      }
-    }, 700);
+      if (i >= sequence.length) clearInterval(interval);
+    }, 800);
+  }, []);
+
+  // start AR session if supported
+  const startAR = (gl) => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+        if (supported) {
+          navigator.xr
+            .requestSession("immersive-ar", { requiredFeatures: ["hit-test", "local-floor"] })
+            .then((session) => gl.xr.setSession(session))
+            .catch((err) => console.error("AR session failed:", err));
+        }
+      });
+    }
   };
 
-  // Delete: remove node and any edges connected to it (simple remove)
-  const deleteValue = (value) => {
-    const v = Number(value);
-    if (!nodes.find((n) => n.id === v)) {
-      setSelectedOp(`Delete (${v}) not found`);
-      setTimeout(() => setSelectedOp(null), 900);
-      return;
-    }
-    setNodes((prev) => prev.filter((n) => n.id !== v));
-    setEdges((prev) => prev.filter(([a, b]) => a !== v && b !== v));
-    setSelectedOp(`Delete ${v}`);
-    setTimeout(() => setSelectedOp(null), 900);
-  };
-
-  // convenience handlers passed to OperationsPanel and ARInteractionManager
-  const handleOperation = (action) => {
-    setActiveButton(action);
-    // visual feedback for button
-    setTimeout(() => setActiveButton(null), 250);
-
-    if (action === "Insert") {
-      // insert random between 10..99
-      insertValue(Math.floor(Math.random() * 90 + 10));
-    } else if (action === "Search") {
-      if (nodes.length === 0) return;
-      const random = nodes[Math.floor(Math.random() * nodes.length)].id;
-      visualizeSearch(random);
-    } else if (action === "Delete") {
-      if (nodes.length === 0) return;
-      deleteValue(nodes[nodes.length - 1].id);
-    }
+  // collect button refs for AR raycasting
+  const addButtonRef = (r) => {
+    if (r && !buttonRefs.current.includes(r)) buttonRefs.current.push(r);
   };
 
   return (
-    <div className="w-full h-[500px]">
+    <div className="w-full h-[400px]">
       <Canvas
-        camera={{ position: [0, 4, 12], fov: 50 }}
+        camera={{ position: [0, 4, 10], fov: 50 }}
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
           startAR(gl);
         }}
       >
-        <ambientLight intensity={0.6} />
+        <ambientLight intensity={0.7} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Titles */}
-        <FadeInText text="Binary Search Tree (BST)" position={[0, 5, -8]} fontSize={0.7} color="white" />
-        <FadeInText
-          text="Left subtree < Root < Right subtree — interactive in AR and desktop"
-          position={[0, -1.5, -8]}
-          fontSize={0.32}
+        {/* Title */}
+        <FadeText text="Binary Search Tree (BST)" position={[0, 5, 0]} fontSize={0.7} color="white" />
+        <FadeText
+          text="Left subtree < Root < Right subtree — fast search & sorting"
+          position={[0, -1.5, 0]}
+          fontSize={0.35}
           color="#fde68a"
         />
 
-        {/* 3D Buttons Panel on left — these groups are collected by addButtonRef */}
-        <group position={[-6, 2, -6]}>
-          <OperationsPanel
-            onOperation={handleOperation}
-            addButtonRef={addButtonRef}
-            activeButton={activeButton}
-          />
-        </group>
-
-        {/* Tree Visualization */}
+        {/* BST Visualization */}
         <BSTVisualization nodes={nodes} edges={edges} highlightNode={highlightNode} />
 
-        {/* Info text box (right) */}
-        {selectedOp && (
-          <FadeInText text={selectedOp} position={[8, 2, -8]} fontSize={0.33} color="#a5f3fc" />
-        )}
+        {/* Operations Panel (3D buttons) */}
+        <OperationsPanel position={[-6, 1, 0]} onOperation={handleOperation} addButtonRef={addButtonRef} />
 
-        {/* AR Interaction Manager uses buttonRefs to trigger operations in AR mode */}
+        {/* Info Panel */}
+        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, 0]} />}
+
+        {/* AR Interaction Manager */}
         <ARInteractionManager buttonRefs={buttonRefs} onOperation={handleOperation} />
 
         <OrbitControls makeDefault />
@@ -254,8 +104,7 @@ const ARPage4 = () => {
   );
 };
 
-// ---------------- AR INTERACTION MANAGER ----------------
-// Listens for sessionstart, adds select listener that raycasts from XR camera
+// === AR Interaction Manager ===
 const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   const { gl } = useThree();
 
@@ -275,20 +124,15 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
 
         const candidates = (buttonRefs.current || [])
           .filter(Boolean)
-          .map((g) => (g ? g.children : []))
+          .map((group) => (group ? group.children : []))
           .flat();
 
         const intersects = raycaster.intersectObjects(candidates, true);
         if (intersects.length > 0) {
           let hit = intersects[0].object;
-          // walk up to parent that has userData.action
-          while (hit && hit.userData?.action === undefined && hit.parent) {
-            hit = hit.parent;
-          }
+          while (hit && hit.userData?.action === undefined && hit.parent) hit = hit.parent;
           const action = hit?.userData?.action;
-          if (action && typeof onOperation === "function") {
-            onOperation(action);
-          }
+          if (action) onOperation(action);
         }
       };
 
@@ -298,63 +142,54 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => {
-      try {
-        gl.xr.removeEventListener("sessionstart", onSessionStart);
-      } catch (e) {}
-    };
+    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
   }, [gl, buttonRefs, onOperation]);
 
   return null;
 };
 
-// ---------------- OPERATIONS PANEL (3D buttons) ----------------
-const OperationsPanel = ({ position = [0, 0, 0], onOperation, addButtonRef }) => {
-  const buttons = [
-    { label: "🔍 Search", action: "Search", y: 0.6 },
-    { label: "➕ Insert", action: "Insert", y: -0.4 },
-    { label: "❌ Delete", action: "Delete", y: -1.4 },
-  ];
+// === Operations Panel ===
+const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
+  const [activeButton, setActiveButton] = useState(null);
+
+  const handleClick = (e, action) => {
+    e.stopPropagation();
+    setActiveButton(action);
+    onOperation(action);
+    setTimeout(() => setActiveButton(null), 250);
+  };
+
+  const renderButton = (label, action, y) => {
+    const color = activeButton === action ? "#22c55e" : "#38bdf8";
+    return (
+      <group position={[0, y, 0]} ref={addButtonRef} userData={{ action }}>
+        <mesh onPointerDown={(e) => handleClick(e, action)}>
+          <boxGeometry args={[2.5, 0.6, 0.15]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <Text position={[0, 0, 0.1]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
+          {label}
+        </Text>
+      </group>
+    );
+  };
 
   return (
     <group position={position}>
-      {buttons.map(({ label, action, y }) => (
-        <mesh
-          key={action}
-          position={[0, y, 0]}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onOperation(action);
-          }}
-          ref={addButtonRef}
-          userData={{ action }}
-        >
-          <boxGeometry args={[3, 0.8, 0.2]} />
-          <meshStandardMaterial color="#38bdf8" />
-          <Text
-            position={[0, 0, 0.12]}
-            fontSize={0.35}
-            color="white"
-            anchorX="center"
-            anchorY="middle"
-            raycast={() => null} // Prevent text from blocking pointer
-          >
-            {label}
-          </Text>
-        </mesh>
-      ))}
+      <FadeText text="BST Operations:" position={[0, 2, 0]} fontSize={0.35} color="#fde68a" />
+      {renderButton("🔍 Search", "Search", 1.2)}
+      {renderButton("➕ Insert", "Insert", 0.4)}
+      {renderButton("❌ Delete", "Delete", -0.4)}
     </group>
   );
 };
 
-
-// ---------------- BST Visualization ----------------
+// === BST Visualization ===
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   <group>
     {edges.map(([a, b], i) => {
-      const start = nodes.find((n) => n.id === a)?.pos;
-      const end = nodes.find((n) => n.id === b)?.pos;
-      if (!start || !end) return null;
+      const start = nodes.find((n) => n.id === a).pos;
+      const end = nodes.find((n) => n.id === b).pos;
       return <Connection key={i} start={start} end={end} />;
     })}
     {nodes.map((node) => (
@@ -363,62 +198,49 @@ const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   </group>
 );
 
-const TreeNode = ({ position, label, isHighlighted }) => {
-  const color = isHighlighted ? "#f87171" : "#60a5fa";
-  const meshRef = useRef();
+const TreeNode = ({ position, label, isHighlighted }) => (
+  <group position={position}>
+    <mesh>
+      <sphereGeometry args={[0.35, 32, 32]} />
+      <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} />
+    </mesh>
+    <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
+      {label}
+    </Text>
+  </group>
+);
 
-  // small pulse for highlighted nodes
-  useFrame(() => {
-    if (!meshRef.current) return;
-    if (isHighlighted) {
-      const s = 1 + 0.08 * Math.sin(Date.now() * 0.01);
-      meshRef.current.scale.set(s, s, s);
-    } else {
-      meshRef.current.scale.set(1, 1, 1);
-    }
-  });
-
+const Connection = ({ start, end }) => {
+  const points = [new THREE.Vector3(...start), new THREE.Vector3(...end)];
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
   return (
-    <group position={position}>
-      <mesh ref={meshRef}>
-        <sphereGeometry args={[0.35, 32, 32]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <Text position={[0, 0.8, 0]} fontSize={0.35} color="white" anchorX="center" anchorY="middle">
-        {String(label)}
-      </Text>
-    </group>
+    <line>
+      <primitive object={geometry} />
+      <lineBasicMaterial color="#94a3b8" linewidth={2} />
+    </line>
   );
 };
 
-// Connection draws an arrow between two points (using ArrowHelper primitive)
-const Connection = ({ start, end }) => {
-  const ref = useRef();
+const OperationInfo = ({ operation, position }) => {
+  let details = "";
+  if (operation === "Search")
+    details = "Start from root. If value < root, go left; if > root, go right. Repeat until found or null.";
+  else if (operation === "Insert")
+    details = "Compare with root. Go left or right until correct empty spot is found, then insert new node.";
+  else if (operation === "Delete")
+    details = "Leaf: remove. One child: replace. Two children: replace with inorder successor.";
 
-  useFrame(() => {
-    if (!ref.current) return;
-    const startVec = new THREE.Vector3(...start);
-    const endVec = new THREE.Vector3(...end);
-    const dir = endVec.clone().sub(startVec).normalize();
-    const length = startVec.distanceTo(endVec);
-    // ArrowHelper API: setDirection + setLength / position
-    ref.current.position.copy(startVec);
-    ref.current.setDirection(dir);
-    ref.current.setLength(length, 0.12, 0.08);
-  });
-
-  return <primitive ref={ref} object={new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0, "#94a3b8")} />;
+  return <FadeText text={`🔹 Operation: ${operation}\n${details}`} position={position} fontSize={0.33} color="#a5f3fc" />;
 };
 
-// FadeInText component (same animate pattern you used)
-const FadeInText = ({ text, position = [0, 0, 0], fontSize = 0.35, color = "white" }) => {
+const FadeText = ({ text, position, fontSize = 0.35, color = "white" }) => {
   const ref = useRef();
   const opacity = useRef(0);
-  const scale = useRef(0.7);
+  const scale = useRef(0.6);
 
   useFrame(() => {
-    if (opacity.current < 1) opacity.current = Math.min(opacity.current + 0.05, 1);
-    if (scale.current < 1) scale.current = Math.min(scale.current + 0.05, 1);
+    opacity.current = Math.min(opacity.current + 0.05, 1);
+    scale.current = Math.min(scale.current + 0.05, 1);
     if (ref.current && ref.current.material) {
       ref.current.material.opacity = opacity.current;
       ref.current.scale.set(scale.current, scale.current, scale.current);
@@ -434,8 +256,8 @@ const FadeInText = ({ text, position = [0, 0, 0], fontSize = 0.35, color = "whit
       anchorX="center"
       anchorY="middle"
       material-transparent
-      maxWidth={10}
-      textAlign="center"
+      maxWidth={9}
+      textAlign="left"
     >
       {text}
     </Text>
