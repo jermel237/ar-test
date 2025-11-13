@@ -9,16 +9,14 @@ const ARPage4 = () => {
   const [highlightNode, setHighlightNode] = useState(null);
   const buttonRefs = useRef([]);
 
-  const TREE_Z = -9; // <-- Entire tree offset along z-axis
-
   const nodes = [
-    { id: 50, pos: [0, 3, TREE_Z] },
-    { id: 30, pos: [-2, 1.5, TREE_Z] },
-    { id: 70, pos: [2, 1.5, TREE_Z] },
-    { id: 20, pos: [-3, 0, TREE_Z] },
-    { id: 40, pos: [-1, 0, TREE_Z] },
-    { id: 60, pos: [1, 0, TREE_Z] },
-    { id: 80, pos: [3, 0, TREE_Z] },
+    { id: 50, pos: [0, 3, -9] },
+    { id: 30, pos: [-2, 1.5, -9] },
+    { id: 70, pos: [2, 1.5, -9] },
+    { id: 20, pos: [-3, 0, -9] },
+    { id: 40, pos: [-1, 0, -9] },
+    { id: 60, pos: [1, 0, -9] },
+    { id: 80, pos: [3, 0, -9] },
   ];
 
   const edges = [
@@ -65,7 +63,7 @@ const ARPage4 = () => {
   };
 
   return (
-    <div className="w-full h-[400px]">
+    <div className="w-full h-[400px] relative">
       <Canvas
         camera={{ position: [0, 4, 10], fov: 50 }}
         onCreated={({ gl }) => {
@@ -76,11 +74,11 @@ const ARPage4 = () => {
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Title */}
-        <FadeText text="Binary Search Tree (BST)" position={[0, 5, TREE_Z]} fontSize={0.7} color="white" />
+        {/* Titles */}
+        <FadeText text="Binary Search Tree (BST)" position={[0, 5, -9]} fontSize={0.7} color="white" />
         <FadeText
           text="Left subtree < Root < Right subtree — fast search & sorting"
-          position={[0, -1.5, TREE_Z]}
+          position={[0, -1.5, -9]}
           fontSize={0.35}
           color="#fde68a"
         />
@@ -89,23 +87,49 @@ const ARPage4 = () => {
         <BSTVisualization nodes={nodes} edges={edges} highlightNode={highlightNode} />
 
         {/* Operations Panel */}
-        <OperationsPanel position={[-6, 1, TREE_Z]} onOperation={handleOperation} addButtonRef={addButtonRef} />
+        <OperationsPanel position={[-6, 1, -9]} onOperation={handleOperation} addButtonRef={addButtonRef} />
 
         {/* Info Panel */}
-        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, TREE_Z]} />}
+        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, -9]} />}
 
         {/* AR Interaction Manager */}
         <ARInteractionManager buttonRefs={buttonRefs} onOperation={handleOperation} />
 
         <OrbitControls makeDefault />
       </Canvas>
+
+      {/* Crosshair overlay */}
+      <Crosshair />
     </div>
   );
 };
 
-// AR Interaction Manager remains unchanged
+// ===== Crosshair Overlay =====
+const Crosshair = () => {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "20px",
+        height: "20px",
+        pointerEvents: "none",
+        zIndex: 1000,
+      }}
+    >
+      <svg width="20" height="20">
+        <line x1="10" y1="0" x2="10" y2="20" stroke="white" strokeWidth="2" />
+        <line x1="0" y1="10" x2="20" y2="10" stroke="white" strokeWidth="2" />
+      </svg>
+    </div>
+  );
+};
+
+// ===== AR Raycast Interaction =====
 const ARInteractionManager = ({ buttonRefs, onOperation }) => {
-  const { gl, camera } = useThree();
+  const { gl } = useThree();
 
   useEffect(() => {
     const onSessionStart = () => {
@@ -143,7 +167,7 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   return null;
 };
 
-// Operations Panel
+// ===== Operations Panel =====
 const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   const [activeButton, setActiveButton] = useState(null);
 
@@ -163,7 +187,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
           <meshStandardMaterial color={color} />
           <Edges color="white" />
         </mesh>
-        <Text position={[0, 0, 0.1]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
+        <Text position={[0, 0, 0.08]} fontSize={0.35} color="white" anchorX="center" anchorY="middle">
           {label}
         </Text>
       </group>
@@ -180,7 +204,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   );
 };
 
-// BST Visualization
+// ===== BST Visualization =====
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   <group>
     {edges.map(([a, b], i) => {
@@ -204,7 +228,11 @@ const TreeNode = ({ position, label, isHighlighted }) => {
     <group position={position}>
       <mesh ref={meshRef}>
         <sphereGeometry args={[0.35, 32, 32]} />
-        <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} emissive={isHighlighted ? "#f87171" : "#000000"} emissiveIntensity={isHighlighted ? 0.7 : 0} />
+        <meshStandardMaterial
+          color={isHighlighted ? "#f87171" : "#60a5fa"}
+          emissive={isHighlighted ? "#f87171" : "#000000"}
+          emissiveIntensity={isHighlighted ? 0.7 : 0}
+        />
         {isHighlighted && <Edges color="#fbbf24" />}
       </mesh>
       <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
@@ -252,7 +280,17 @@ const FadeText = ({ text, position, fontSize = 0.35, color = "white" }) => {
   });
 
   return (
-    <Text ref={ref} position={position} fontSize={fontSize} color={color} anchorX="center" anchorY="middle" material-transparent maxWidth={9} textAlign="left">
+    <Text
+      ref={ref}
+      position={position}
+      fontSize={fontSize}
+      color={color}
+      anchorX="center"
+      anchorY="middle"
+      material-transparent
+      maxWidth={9}
+      textAlign="left"
+    >
       {text}
     </Text>
   );
