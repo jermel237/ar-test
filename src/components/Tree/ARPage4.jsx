@@ -78,7 +78,7 @@ const ARPage4 = () => {
         <FadeText text="Binary Search Tree (BST)" position={[0, 5, -9]} fontSize={0.7} color="white" />
         <FadeText
           text="Left subtree < Root < Right subtree — fast search & sorting"
-          position={[0, -1.5, 0]}
+          position={[0, -1.5, -9]}
           fontSize={0.35}
           color="#fde68a"
         />
@@ -161,7 +161,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
           <meshStandardMaterial color={color} />
           <Edges color="white" />
         </mesh>
-        <Text position={[0, 0, 0.1]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
+        <Text position={[0, 0, -9]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
           {label}
         </Text>
       </group>
@@ -205,7 +205,7 @@ const TreeNode = ({ position, label, isHighlighted }) => {
         <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} emissive={isHighlighted ? "#f87171" : "#000000"} emissiveIntensity={isHighlighted ? 0.7 : 0} />
         {isHighlighted && <Edges color="#fbbf24" />}
       </mesh>
-      <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
+      <Text position={[0, 0.8, -9]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
         {label}
       </Text>
     </group>
