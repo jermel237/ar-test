@@ -309,73 +309,44 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
 };
 
 // ---------------- OPERATIONS PANEL (3D buttons) ----------------
-const OperationsPanel = ({ position = [0, 0, 0], onOperation, addButtonRef, activeButton }) => {
-  const [localActive, setLocalActive] = useState(null);
-
-  useEffect(() => {
-    if (activeButton) {
-      setLocalActive(activeButton);
-      const t = setTimeout(() => setLocalActive(null), 300);
-      return () => clearTimeout(t);
-    }
-  }, [activeButton]);
-
-  const handlePointerDown = (e, action) => {
-    e.stopPropagation();
-    setLocalActive(action);
-    onOperation(action);
-    setTimeout(() => setLocalActive(null), 250);
-  };
-
-  const renderButton = (label, action, y) => {
-    const isActive = localActive === action;
-    const color = isActive ? "#22c55e" : "#38bdf8";
-
-    return (
-      <group
-        position={[0, y, 0]}
-        ref={(r) => {
-          // add the group ref once so ARInteractionManager can raycast it
-          if (r) addButtonRef(r);
-        }}
-        userData={{ action }}
-      >
-        {/* Mesh (catch non-AR pointer events) */}
-        <mesh
-          onPointerDown={(e) => handlePointerDown(e, action)}
-          castShadow
-          receiveShadow
-          userData={{ action }}
-        >
-          <boxGeometry args={[3.2, 0.8, 0.12]} />
-          <meshStandardMaterial color={color} />
-        </mesh>
-
-        {/* Text label — also pointerable */}
-        <Text
-          position={[0, 0, 0.07]}
-          fontSize={0.35}
-          anchorX="center"
-          anchorY="middle"
-          onPointerDown={(e) => handlePointerDown(e, action)}
-        >
-          {label}
-        </Text>
-      </group>
-    );
-  };
+const OperationsPanel = ({ position = [0, 0, 0], onOperation, addButtonRef }) => {
+  const buttons = [
+    { label: "🔍 Search", action: "Search", y: 0.6 },
+    { label: "➕ Insert", action: "Insert", y: -0.4 },
+    { label: "❌ Delete", action: "Delete", y: -1.4 },
+  ];
 
   return (
     <group position={position}>
-      <Text position={[0, 1.6, 0]} fontSize={0.32} color="#fde68a" anchorX="center" anchorY="middle">
-        Queue Operations:
-      </Text>
-      {renderButton("🔍 Search", "Search", 0.6)}
-      {renderButton("➕ Insert", "Insert", -0.4)}
-      {renderButton("❌ Delete", "Delete", -1.4)}
+      {buttons.map(({ label, action, y }) => (
+        <mesh
+          key={action}
+          position={[0, y, 0]}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onOperation(action);
+          }}
+          ref={addButtonRef}
+          userData={{ action }}
+        >
+          <boxGeometry args={[3, 0.8, 0.2]} />
+          <meshStandardMaterial color="#38bdf8" />
+          <Text
+            position={[0, 0, 0.12]}
+            fontSize={0.35}
+            color="white"
+            anchorX="center"
+            anchorY="middle"
+            raycast={() => null} // Prevent text from blocking pointer
+          >
+            {label}
+          </Text>
+        </mesh>
+      ))}
     </group>
   );
 };
+
 
 // ---------------- BST Visualization ----------------
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
