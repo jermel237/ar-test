@@ -1,4 +1,4 @@
-// ARPage4.jsx
+// ARPage4.jsx (Crosshair fixed to camera)
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text, Edges } from "@react-three/drei";
@@ -95,36 +95,39 @@ const ARPage4 = () => {
         {/* AR Interaction Manager */}
         <ARInteractionManager buttonRefs={buttonRefs} onOperation={handleOperation} />
 
+        {/* Crosshair always in front of camera */}
+        <CameraCrosshair distance={2} />
+
         <OrbitControls makeDefault />
       </Canvas>
-
-      {/* Crosshair overlay */}
-      <Crosshair />
     </div>
   );
 };
 
-// ===== Crosshair Overlay =====
-const Crosshair = () => {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%)",
-        width: "20px",
-        height: "20px",
-        pointerEvents: "none",
-        zIndex: 1000,
-      }}
-    >
-      <svg width="20" height="20">
-        <line x1="10" y1="0" x2="10" y2="20" stroke="white" strokeWidth="2" />
-        <line x1="0" y1="10" x2="20" y2="10" stroke="white" strokeWidth="2" />
-      </svg>
-    </div>
-  );
+// ===== Camera-attached Crosshair =====
+const CameraCrosshair = ({ distance = 2 }) => {
+  const { camera, scene } = useThree();
+  const crossRef = useRef();
+
+  useEffect(() => {
+    const geometry = new THREE.BufferGeometry();
+    const vertices = new Float32Array([
+      -0.05, 0, 0, 0.05, 0, 0, // horizontal line
+      0, -0.05, 0, 0, 0.05, 0, // vertical line
+    ]);
+    geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+
+    const material = new THREE.LineBasicMaterial({ color: "white", linewidth: 2 });
+    const cross = new THREE.LineSegments(geometry, material);
+
+    crossRef.current = cross;
+    camera.add(cross);
+    cross.position.set(0, 0, -distance);
+
+    return () => camera.remove(cross);
+  }, [camera, distance]);
+
+  return null;
 };
 
 // ===== AR Raycast Interaction =====
