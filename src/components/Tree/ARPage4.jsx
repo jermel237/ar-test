@@ -1,7 +1,7 @@
 // ARPage4.jsx
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Text } from "@react-three/drei";
+import { OrbitControls, Text, Edges } from "@react-three/drei";
 import * as THREE from "three";
 
 const ARPage4 = () => {
@@ -28,7 +28,6 @@ const ARPage4 = () => {
     [70, 80],
   ];
 
-  // handle BST operations with highlight animation
   const handleOperation = useCallback((op) => {
     setSelectedOp(op);
     setHighlightNode(null);
@@ -46,7 +45,6 @@ const ARPage4 = () => {
     }, 800);
   }, []);
 
-  // start AR session if supported
   const startAR = (gl) => {
     if (navigator.xr) {
       navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
@@ -60,7 +58,6 @@ const ARPage4 = () => {
     }
   };
 
-  // collect button refs for AR raycasting
   const addButtonRef = (r) => {
     if (r && !buttonRefs.current.includes(r)) buttonRefs.current.push(r);
   };
@@ -89,7 +86,7 @@ const ARPage4 = () => {
         {/* BST Visualization */}
         <BSTVisualization nodes={nodes} edges={edges} highlightNode={highlightNode} />
 
-        {/* Operations Panel (3D buttons) */}
+        {/* Operations Panel */}
         <OperationsPanel position={[-6, 1, 0]} onOperation={handleOperation} addButtonRef={addButtonRef} />
 
         {/* Info Panel */}
@@ -104,9 +101,9 @@ const ARPage4 = () => {
   );
 };
 
-// === AR Interaction Manager ===
+// AR Raycast Interaction
 const ARInteractionManager = ({ buttonRefs, onOperation }) => {
-  const { gl } = useThree();
+  const { gl, camera } = useThree();
 
   useEffect(() => {
     const onSessionStart = () => {
@@ -115,19 +112,16 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
 
       const onSelect = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
 
+        const raycaster = new THREE.Raycaster();
         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
         raycaster.set(origin, dir);
 
-        const candidates = (buttonRefs.current || [])
-          .filter(Boolean)
-          .map((group) => (group ? group.children : []))
-          .flat();
-
+        const candidates = (buttonRefs.current || []).map((b) => b.children).flat();
         const intersects = raycaster.intersectObjects(candidates, true);
+
         if (intersects.length > 0) {
           let hit = intersects[0].object;
           while (hit && hit.userData?.action === undefined && hit.parent) hit = hit.parent;
@@ -137,8 +131,7 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
       };
 
       session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      return () => session.removeEventListener("select", onSelect);
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
@@ -148,7 +141,7 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   return null;
 };
 
-// === Operations Panel ===
+// Operations Panel with AR-ready buttons
 const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   const [activeButton, setActiveButton] = useState(null);
 
@@ -166,6 +159,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
         <mesh onPointerDown={(e) => handleClick(e, action)}>
           <boxGeometry args={[2.5, 0.6, 0.15]} />
           <meshStandardMaterial color={color} />
+          <Edges color="white" />
         </mesh>
         <Text position={[0, 0, 0.1]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
           {label}
@@ -184,7 +178,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   );
 };
 
-// === BST Visualization ===
+// BST Visualization with highlight glow
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   <group>
     {edges.map(([a, b], i) => {
@@ -198,17 +192,25 @@ const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   </group>
 );
 
-const TreeNode = ({ position, label, isHighlighted }) => (
-  <group position={position}>
-    <mesh>
-      <sphereGeometry args={[0.35, 32, 32]} />
-      <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} />
-    </mesh>
-    <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
-      {label}
-    </Text>
-  </group>
-);
+const TreeNode = ({ position, label, isHighlighted }) => {
+  const meshRef = useRef();
+  useFrame(() => {
+    if (meshRef.current) meshRef.current.material.emissiveIntensity = isHighlighted ? 1 : 0;
+  });
+
+  return (
+    <group position={position}>
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[0.35, 32, 32]} />
+        <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} emissive={isHighlighted ? "#f87171" : "#000000"} emissiveIntensity={isHighlighted ? 0.7 : 0} />
+        {isHighlighted && <Edges color="#fbbf24" />}
+      </mesh>
+      <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
+        {label}
+      </Text>
+    </group>
+  );
+};
 
 const Connection = ({ start, end }) => {
   const points = [new THREE.Vector3(...start), new THREE.Vector3(...end)];
@@ -248,17 +250,7 @@ const FadeText = ({ text, position, fontSize = 0.35, color = "white" }) => {
   });
 
   return (
-    <Text
-      ref={ref}
-      position={position}
-      fontSize={fontSize}
-      color={color}
-      anchorX="center"
-      anchorY="middle"
-      material-transparent
-      maxWidth={9}
-      textAlign="left"
-    >
+    <Text ref={ref} position={position} fontSize={fontSize} color={color} anchorX="center" anchorY="middle" material-transparent maxWidth={9} textAlign="left">
       {text}
     </Text>
   );
