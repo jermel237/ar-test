@@ -9,14 +9,16 @@ const ARPage4 = () => {
   const [highlightNode, setHighlightNode] = useState(null);
   const buttonRefs = useRef([]);
 
+  const TREE_Z = -9; // <-- Entire tree offset along z-axis
+
   const nodes = [
-    { id: 50, pos: [0, 3, 0] },
-    { id: 30, pos: [-2, 1.5, 0] },
-    { id: 70, pos: [2, 1.5, 0] },
-    { id: 20, pos: [-3, 0, 0] },
-    { id: 40, pos: [-1, 0, 0] },
-    { id: 60, pos: [1, 0, 0] },
-    { id: 80, pos: [3, 0, 0] },
+    { id: 50, pos: [0, 3, TREE_Z] },
+    { id: 30, pos: [-2, 1.5, TREE_Z] },
+    { id: 70, pos: [2, 1.5, TREE_Z] },
+    { id: 20, pos: [-3, 0, TREE_Z] },
+    { id: 40, pos: [-1, 0, TREE_Z] },
+    { id: 60, pos: [1, 0, TREE_Z] },
+    { id: 80, pos: [3, 0, TREE_Z] },
   ];
 
   const edges = [
@@ -75,10 +77,10 @@ const ARPage4 = () => {
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
         {/* Title */}
-        <FadeText text="Binary Search Tree (BST)" position={[0, 5, -9]} fontSize={0.7} color="white" />
+        <FadeText text="Binary Search Tree (BST)" position={[0, 5, TREE_Z]} fontSize={0.7} color="white" />
         <FadeText
           text="Left subtree < Root < Right subtree — fast search & sorting"
-          position={[0, -1.5, -9]}
+          position={[0, -1.5, TREE_Z]}
           fontSize={0.35}
           color="#fde68a"
         />
@@ -87,10 +89,10 @@ const ARPage4 = () => {
         <BSTVisualization nodes={nodes} edges={edges} highlightNode={highlightNode} />
 
         {/* Operations Panel */}
-        <OperationsPanel position={[-6, 1, -9]} onOperation={handleOperation} addButtonRef={addButtonRef} />
+        <OperationsPanel position={[-6, 1, TREE_Z]} onOperation={handleOperation} addButtonRef={addButtonRef} />
 
         {/* Info Panel */}
-        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, -9]} />}
+        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, TREE_Z]} />}
 
         {/* AR Interaction Manager */}
         <ARInteractionManager buttonRefs={buttonRefs} onOperation={handleOperation} />
@@ -101,7 +103,7 @@ const ARPage4 = () => {
   );
 };
 
-// AR Raycast Interaction
+// AR Interaction Manager remains unchanged
 const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   const { gl, camera } = useThree();
 
@@ -141,7 +143,7 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   return null;
 };
 
-// Operations Panel with AR-ready buttons
+// Operations Panel
 const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   const [activeButton, setActiveButton] = useState(null);
 
@@ -161,7 +163,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
           <meshStandardMaterial color={color} />
           <Edges color="white" />
         </mesh>
-        <Text position={[0, 0, -9]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
+        <Text position={[0, 0, 0.1]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
           {label}
         </Text>
       </group>
@@ -170,7 +172,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
 
   return (
     <group position={position}>
-      <FadeText text="BST Operations:" position={[0, 2, -9]} fontSize={0.35} color="#fde68a" />
+      <FadeText text="BST Operations:" position={[0, 2, 0]} fontSize={0.35} color="#fde68a" />
       {renderButton("🔍 Search", "Search", 1.2)}
       {renderButton("➕ Insert", "Insert", 0.4)}
       {renderButton("❌ Delete", "Delete", -0.4)}
@@ -178,7 +180,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   );
 };
 
-// BST Visualization with highlight glow
+// BST Visualization
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   <group>
     {edges.map(([a, b], i) => {
@@ -205,7 +207,7 @@ const TreeNode = ({ position, label, isHighlighted }) => {
         <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} emissive={isHighlighted ? "#f87171" : "#000000"} emissiveIntensity={isHighlighted ? 0.7 : 0} />
         {isHighlighted && <Edges color="#fbbf24" />}
       </mesh>
-      <Text position={[0, 0.8, -9]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
+      <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
         {label}
       </Text>
     </group>
