@@ -5,23 +5,16 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Text, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
-/**
- * ARPage3
- * - AR Binary Search Tree visualization
- * - Buttons rendered *inside* AR Canvas as 3D text panels
- * - Works in AR or normal 3D mode
- */
 const ARPage4 = () => {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [highlightNode, setHighlightNode] = useState(null);
-  const [operationInfo, setOperationInfo] = useState("Tap a 3D button to start!");
+  const [operationInfo, setOperationInfo] = useState("Tap a button to begin!");
 
-  // --- basic BST operations ---
   const insertNode = (value) => {
     if (nodes.find((n) => n.id === value)) {
       setOperationInfo(`Node ${value} already exists.`);
@@ -58,41 +51,61 @@ const ARPage4 = () => {
     setTimeout(() => setHighlightNode(null), 1000);
   };
 
+  // --- Start AR Session if available ---
+  const startAR = (gl) => {
+    if (navigator.xr && navigator.xr.isSessionSupported) {
+      navigator.xr
+        .isSessionSupported("immersive-ar")
+        .then((supported) => {
+          if (supported)
+            return navigator.xr.requestSession("immersive-ar", {
+              requiredFeatures: ["hit-test", "local-floor"],
+            });
+          return null;
+        })
+        .then((session) => {
+          if (session) gl.xr.setSession(session);
+        })
+        .catch((err) => console.warn("AR start failed:", err));
+    }
+  };
+
   return (
-    <div className="w-full h-[400px]">
+    <div className="w-full h-[500px]">
       <Canvas
-        camera={{ position: [0, 4, 15], fov: 50 }}
+        camera={{ position: [0, 4, 12], fov: 50 }}
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
           startAR(gl);
         }}
       >
-        <ambientLight intensity={0.5} />
+        <ambientLight intensity={0.6} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
+        <OrbitControls />
 
-        {/* ====== Buttons rendered inside the Canvas ====== */}
-        <group position={[-6, 3, -5]}>
-          <ARButton
+        {/* 3D Buttons (moved closer to camera) */}
+        <group position={[-4, 3, -3]}>
+          <ARButton3D
             label="➕ Insert"
             color="#22c55e"
             position={[0, 0, 0]}
-            onClick={() =>
+            onPress={() =>
               insertNode(Math.floor(Math.random() * 90 + 10).toString())
             }
           />
-          <ARButton
+          <ARButton3D
             label="❌ Delete"
             color="#ef4444"
-            position={[0, -1.5, 0]}
-            onClick={() => {
+            position={[0, -1.4, 0]}
+            onPress={() => {
               if (nodes.length > 0) deleteNode(nodes[nodes.length - 1].id);
             }}
           />
-          <ARButton
+          <ARButton3D
             label="🔍 Search"
             color="#3b82f6"
-            position={[0, -3, 0]}
-            onClick={() => {
+            position={[0, -2.8, 0]}
+            onPress={() => {
               if (nodes.length > 0) {
                 const random =
                   nodes[Math.floor(Math.random() * nodes.length)].id;
@@ -102,7 +115,7 @@ const ARPage4 = () => {
           />
         </group>
 
-        {/* ====== Scene content ====== */}
+        {/* BST Visualization */}
         <group position={[0, -1, -8]}>
           <FadeText
             text="Binary Search Tree Visualization"
@@ -117,8 +130,8 @@ const ARPage4 = () => {
           />
         </group>
 
-        {/* Floating info text */}
-        <group position={[0, -4, -5]}>
+        {/* Info text */}
+        <group position={[0, -4, -6]}>
           <FadeText
             text={operationInfo}
             fontSize={0.35}
@@ -131,41 +144,34 @@ const ARPage4 = () => {
   );
 };
 
-/* Start AR session if supported */
-const startAR = (gl) => {
-  if (navigator.xr && navigator.xr.isSessionSupported) {
-    navigator.xr
-      .isSessionSupported("immersive-ar")
-      .then((supported) => {
-        if (supported)
-          return navigator.xr.requestSession("immersive-ar", {
-            requiredFeatures: ["hit-test", "local-floor"],
-          });
-        return null;
-      })
-      .then((session) => {
-        if (session) gl.xr.setSession(session);
-      })
-      .catch((err) => console.warn("AR start failed:", err));
-  }
-};
-
-// ====== 3D BUTTON COMPONENT ======
-const ARButton = ({ label, color, position, onClick }) => {
+/* === 3D Button Component (Interactable) === */
+const ARButton3D = ({ label, color, position, onPress }) => {
   const [hover, setHover] = useState(false);
+
+  const handlePointerDown = (e) => {
+    e.stopPropagation();
+    onPress?.();
+  };
+
   return (
     <group
       position={position}
-      onClick={onClick}
-      onPointerOver={() => setHover(true)}
-      onPointerOut={() => setHover(false)}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHover(true);
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation();
+        setHover(false);
+      }}
+      onPointerDown={handlePointerDown}
     >
       <mesh>
-        <boxGeometry args={[3.2, 1, 0.2]} />
-        <meshStandardMaterial color={hover ? "#fef08a" : color} />
+        <boxGeometry args={[2.8, 1, 0.25]} />
+        <meshStandardMaterial color={hover ? "#fde68a" : color} />
       </mesh>
       <Text
-        position={[0, 0, 0.15]}
+        position={[0, 0, 0.2]}
         fontSize={0.4}
         color="white"
         anchorX="center"
@@ -177,7 +183,7 @@ const ARButton = ({ label, color, position, onClick }) => {
   );
 };
 
-// ====== BST visualization components ======
+/* === BST + Nodes === */
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   <group>
     {edges.map(([a, b], i) => {
@@ -238,6 +244,7 @@ const Connection = ({ start, end }) => {
   );
 };
 
+/* === Smooth Text Fade === */
 const FadeText = ({ text, position = [0, 0, 0], fontSize = 0.5, color }) => {
   const [opacity, setOpacity] = useState(0);
   useEffect(() => {
