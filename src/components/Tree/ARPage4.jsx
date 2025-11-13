@@ -1,4 +1,4 @@
-// ARPage4.jsx (Crosshair fixed to camera)
+// ARPage4.jsx
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text, Edges } from "@react-three/drei";
@@ -9,14 +9,16 @@ const ARPage4 = () => {
   const [highlightNode, setHighlightNode] = useState(null);
   const buttonRefs = useRef([]);
 
+  const TREE_Z = -9; // <-- Entire tree offset along z-axis
+
   const nodes = [
-    { id: 50, pos: [0, 3, -9] },
-    { id: 30, pos: [-2, 1.5, -9] },
-    { id: 70, pos: [2, 1.5, -9] },
-    { id: 20, pos: [-3, 0, -9] },
-    { id: 40, pos: [-1, 0, -9] },
-    { id: 60, pos: [1, 0, -9] },
-    { id: 80, pos: [3, 0, -9] },
+    { id: 50, pos: [0, 3, TREE_Z] },
+    { id: 30, pos: [-2, 1.5, TREE_Z] },
+    { id: 70, pos: [2, 1.5, TREE_Z] },
+    { id: 20, pos: [-3, 0, TREE_Z] },
+    { id: 40, pos: [-1, 0, TREE_Z] },
+    { id: 60, pos: [1, 0, TREE_Z] },
+    { id: 80, pos: [3, 0, TREE_Z] },
   ];
 
   const edges = [
@@ -63,7 +65,7 @@ const ARPage4 = () => {
   };
 
   return (
-    <div className="w-full h-[400px] relative">
+    <div className="w-full h-[400px]">
       <Canvas
         camera={{ position: [0, 4, 10], fov: 50 }}
         onCreated={({ gl }) => {
@@ -74,11 +76,11 @@ const ARPage4 = () => {
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Titles */}
-        <FadeText text="Binary Search Tree (BST)" position={[0, 5, -9]} fontSize={0.7} color="white" />
+        {/* Title */}
+        <FadeText text="Binary Search Tree (BST)" position={[0, 5, TREE_Z]} fontSize={0.7} color="white" />
         <FadeText
           text="Left subtree < Root < Right subtree — fast search & sorting"
-          position={[0, -1.5, -9]}
+          position={[0, -1.5, TREE_Z]}
           fontSize={0.35}
           color="#fde68a"
         />
@@ -87,16 +89,13 @@ const ARPage4 = () => {
         <BSTVisualization nodes={nodes} edges={edges} highlightNode={highlightNode} />
 
         {/* Operations Panel */}
-        <OperationsPanel position={[-6, 1, -9]} onOperation={handleOperation} addButtonRef={addButtonRef} />
+        <OperationsPanel position={[-6, 1, TREE_Z]} onOperation={handleOperation} addButtonRef={addButtonRef} />
 
         {/* Info Panel */}
-        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, -9]} />}
+        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, TREE_Z]} />}
 
         {/* AR Interaction Manager */}
         <ARInteractionManager buttonRefs={buttonRefs} onOperation={handleOperation} />
-
-        {/* Crosshair always in front of camera */}
-        <CameraCrosshair distance={2} />
 
         <OrbitControls makeDefault />
       </Canvas>
@@ -104,35 +103,9 @@ const ARPage4 = () => {
   );
 };
 
-// ===== Camera-attached Crosshair =====
-const CameraCrosshair = ({ distance = 2 }) => {
-  const { camera, scene } = useThree();
-  const crossRef = useRef();
-
-  useEffect(() => {
-    const geometry = new THREE.BufferGeometry();
-    const vertices = new Float32Array([
-      -0.05, 0, 0, 0.05, 0, 0, // horizontal line
-      0, -0.05, 0, 0, 0.05, 0, // vertical line
-    ]);
-    geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
-
-    const material = new THREE.LineBasicMaterial({ color: "white", linewidth: 2 });
-    const cross = new THREE.LineSegments(geometry, material);
-
-    crossRef.current = cross;
-    camera.add(cross);
-    cross.position.set(0, 0, -distance);
-
-    return () => camera.remove(cross);
-  }, [camera, distance]);
-
-  return null;
-};
-
-// ===== AR Raycast Interaction =====
+// AR Interaction Manager remains unchanged
 const ARInteractionManager = ({ buttonRefs, onOperation }) => {
-  const { gl } = useThree();
+  const { gl, camera } = useThree();
 
   useEffect(() => {
     const onSessionStart = () => {
@@ -170,7 +143,7 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   return null;
 };
 
-// ===== Operations Panel =====
+// Operations Panel
 const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   const [activeButton, setActiveButton] = useState(null);
 
@@ -190,7 +163,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
           <meshStandardMaterial color={color} />
           <Edges color="white" />
         </mesh>
-        <Text position={[0, 0, 0.08]} fontSize={0.35} color="white" anchorX="center" anchorY="middle">
+        <Text position={[0, 0, 0.1]} fontSize={0.35} color="white" anchorX="center" anchorY="middle" raycast={() => null}>
           {label}
         </Text>
       </group>
@@ -207,7 +180,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
   );
 };
 
-// ===== BST Visualization =====
+// BST Visualization
 const BSTVisualization = ({ nodes, edges, highlightNode }) => (
   <group>
     {edges.map(([a, b], i) => {
@@ -231,11 +204,7 @@ const TreeNode = ({ position, label, isHighlighted }) => {
     <group position={position}>
       <mesh ref={meshRef}>
         <sphereGeometry args={[0.35, 32, 32]} />
-        <meshStandardMaterial
-          color={isHighlighted ? "#f87171" : "#60a5fa"}
-          emissive={isHighlighted ? "#f87171" : "#000000"}
-          emissiveIntensity={isHighlighted ? 0.7 : 0}
-        />
+        <meshStandardMaterial color={isHighlighted ? "#f87171" : "#60a5fa"} emissive={isHighlighted ? "#f87171" : "#000000"} emissiveIntensity={isHighlighted ? 0.7 : 0} />
         {isHighlighted && <Edges color="#fbbf24" />}
       </mesh>
       <Text position={[0, 0.8, 0]} fontSize={0.35} color="#ffffff" anchorX="center" anchorY="middle">
@@ -283,17 +252,7 @@ const FadeText = ({ text, position, fontSize = 0.35, color = "white" }) => {
   });
 
   return (
-    <Text
-      ref={ref}
-      position={position}
-      fontSize={fontSize}
-      color={color}
-      anchorX="center"
-      anchorY="middle"
-      material-transparent
-      maxWidth={9}
-      textAlign="left"
-    >
+    <Text ref={ref} position={position} fontSize={fontSize} color={color} anchorX="center" anchorY="middle" material-transparent maxWidth={9} textAlign="left">
       {text}
     </Text>
   );
