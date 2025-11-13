@@ -75,7 +75,7 @@ const ARPage4 = () => {
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
         {/* Title */}
-        <FadeText text="Binary Search Tree (BST)" position={[0, 5, 0]} fontSize={0.7} color="white" />
+        <FadeText text="Binary Search Tree (BST)" position={[0, 5, -9]} fontSize={0.7} color="white" />
         <FadeText
           text="Left subtree < Root < Right subtree — fast search & sorting"
           position={[0, -1.5, 0]}
@@ -87,10 +87,10 @@ const ARPage4 = () => {
         <BSTVisualization nodes={nodes} edges={edges} highlightNode={highlightNode} />
 
         {/* Operations Panel */}
-        <OperationsPanel position={[-6, 1, 0]} onOperation={handleOperation} addButtonRef={addButtonRef} />
+        <OperationsPanel position={[-6, 1, -9]} onOperation={handleOperation} addButtonRef={addButtonRef} />
 
         {/* Info Panel */}
-        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, 0]} />}
+        {selectedOp && <OperationInfo operation={selectedOp} position={[8, 2, -9]} />}
 
         {/* AR Interaction Manager */}
         <ARInteractionManager buttonRefs={buttonRefs} onOperation={handleOperation} />
@@ -170,7 +170,7 @@ const OperationsPanel = ({ position, onOperation, addButtonRef }) => {
 
   return (
     <group position={position}>
-      <FadeText text="BST Operations:" position={[0, 2, 0]} fontSize={0.35} color="#fde68a" />
+      <FadeText text="BST Operations:" position={[0, 2, -9]} fontSize={0.35} color="#fde68a" />
       {renderButton("🔍 Search", "Search", 1.2)}
       {renderButton("➕ Insert", "Insert", 0.4)}
       {renderButton("❌ Delete", "Delete", -0.4)}
