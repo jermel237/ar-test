@@ -8,6 +8,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   const [page, setPage] = useState(0);
   const [selectedBox, setSelectedBox] = useState(null);
   const boxRefs = useRef([]);
+  const [boxPositions, setBoxPositions] = useState(null);
 
   // --- Helper to collect box refs ---
   const addBoxRef = (r) => {
@@ -18,6 +19,15 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
     const mid = (data.length - 1) / 2;
     return data.map((_, i) => [(i - mid) * spacing, 0, 0]);
   }, [data, spacing]);
+
+  // Initialize box positions
+  useEffect(() => {
+    if (!boxPositions) {
+      const mid = (data.length - 1) / 2;
+      const initialPositions = data.map((_, i) => [(i - mid) * spacing, 0, 0]);
+      setBoxPositions(initialPositions);
+    }
+  }, [data, spacing, boxPositions]);
 
   const handleClick = (i) => {
     setSelectedBox(i);
@@ -50,6 +60,18 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
     }
   };
 
+  // Update box position from drag
+  const updateBoxPosition = (index, newPosition) => {
+    setBoxPositions((prev) => {
+      if (!prev) return prev;
+      const updated = [...prev];
+      updated[index] = newPosition;
+      return updated;
+    });
+  };
+
+  const currentPositions = boxPositions || positions;
+
   return (
     <div className="w-full h-[300px]">
       <Canvas
@@ -78,7 +100,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
               key={i}
               index={i}
               value={value}
-              position={positions[i]}
+              position={currentPositions[i]}
               selected={selectedBox === i}
               onClick={() => handleClick(i)}
               ref={(r) => addBoxRef(r)}
@@ -99,6 +121,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
         <ARInteractionManager
           boxRefs={boxRefs}
           setSelectedBox={setSelectedBox}
+          updateBoxPosition={updateBoxPosition}
         />
         <OrbitControls makeDefault />
       </Canvas>
@@ -106,25 +129,48 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   );
 };
 
-// --- AR Interaction Manager ---
-const ARInteractionManager = ({ boxRefs, setSelectedBox }) => {
+// --- AR Interaction Manager with Drag and Drop ---
+const ARInteractionManager = ({ boxRefs, setSelectedBox, updateBoxPosition }) => {
   const { gl } = useThree();
+  const dragState = useRef({
+    isDragging: false,
+    draggedIndex: null,
+    startPosition: null,
+    inputSource: null,
+  });
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
-        const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
-        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
-        const origin = cam.getWorldPosition(new THREE.Vector3());
-        raycaster.set(origin, dir);
+      // Helper function to get ray from controller
+      const getRayFromController = (inputSource, frame, refSpace) => {
+        if (!inputSource.gripSpace) return null;
+        
+        const pose = frame.getPose(inputSource.targetRaySpace, refSpace);
+        if (!pose) return null;
 
+        const position = new THREE.Vector3(
+          pose.transform.position.x,
+          pose.transform.position.y,
+          pose.transform.position.z
+        );
+        
+        const quaternion = new THREE.Quaternion(
+          pose.transform.orientation.x,
+          pose.transform.orientation.y,
+          pose.transform.orientation.z,
+          pose.transform.orientation.w
+        );
+        
+        const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+        
+        return { position, direction };
+      };
+
+      // Helper to find intersected box
+      const findIntersectedBox = (raycaster) => {
         const candidates = (boxRefs.current || [])
           .map((group) => (group ? group.children : []))
           .flat();
@@ -135,19 +181,190 @@ const ARInteractionManager = ({ boxRefs, setSelectedBox }) => {
           while (hit && hit.userData?.boxIndex === undefined && hit.parent) {
             hit = hit.parent;
           }
-          const idx = hit?.userData?.boxIndex;
-          if (idx !== undefined) setSelectedBox(idx);
+          return {
+            index: hit?.userData?.boxIndex,
+            point: intersects[0].point,
+            object: hit,
+          };
+        }
+        return null;
+      };
+
+      // Select start - begin potential drag
+      const onSelectStart = (event) => {
+        const inputSource = event.inputSource;
+        const xrCamera = gl.xr.getCamera();
+        const raycaster = new THREE.Raycaster();
+        
+        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
+        const dir = new THREE.Vector3(0, 0, -1)
+          .applyQuaternion(cam.quaternion)
+          .normalize();
+        const origin = cam.getWorldPosition(new THREE.Vector3());
+        raycaster.set(origin, dir);
+
+        const hitResult = findIntersectedBox(raycaster);
+        
+        if (hitResult && hitResult.index !== undefined) {
+          dragState.current = {
+            isDragging: true,
+            draggedIndex: hitResult.index,
+            startPosition: hitResult.point.clone(),
+            inputSource: inputSource,
+            initialBoxPosition: boxRefs.current[hitResult.index]?.position.clone(),
+          };
+          setSelectedBox(hitResult.index);
         }
       };
 
+      // Select end - finish drag
+      const onSelectEnd = () => {
+        if (dragState.current.isDragging) {
+          dragState.current = {
+            isDragging: false,
+            draggedIndex: null,
+            startPosition: null,
+            inputSource: null,
+            initialBoxPosition: null,
+          };
+        }
+      };
+
+      // Squeeze start - alternative drag trigger (pinch gesture)
+      const onSqueezeStart = (event) => {
+        const inputSource = event.inputSource;
+        const xrCamera = gl.xr.getCamera();
+        const raycaster = new THREE.Raycaster();
+        
+        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
+        const dir = new THREE.Vector3(0, 0, -1)
+          .applyQuaternion(cam.quaternion)
+          .normalize();
+        const origin = cam.getWorldPosition(new THREE.Vector3());
+        raycaster.set(origin, dir);
+
+        const hitResult = findIntersectedBox(raycaster);
+        
+        if (hitResult && hitResult.index !== undefined) {
+          dragState.current = {
+            isDragging: true,
+            draggedIndex: hitResult.index,
+            startPosition: hitResult.point.clone(),
+            inputSource: inputSource,
+            initialBoxPosition: boxRefs.current[hitResult.index]?.position.clone(),
+          };
+          setSelectedBox(hitResult.index);
+        }
+      };
+
+      // Squeeze end - finish pinch drag
+      const onSqueezeEnd = () => {
+        if (dragState.current.isDragging) {
+          dragState.current = {
+            isDragging: false,
+            draggedIndex: null,
+            startPosition: null,
+            inputSource: null,
+            initialBoxPosition: null,
+          };
+        }
+      };
+
+      // Simple select for tap without drag
+      const onSelect = () => {
+        if (!dragState.current.isDragging) {
+          const xrCamera = gl.xr.getCamera();
+          const raycaster = new THREE.Raycaster();
+          const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
+          const dir = new THREE.Vector3(0, 0, -1)
+            .applyQuaternion(cam.quaternion)
+            .normalize();
+          const origin = cam.getWorldPosition(new THREE.Vector3());
+          raycaster.set(origin, dir);
+
+          const hitResult = findIntersectedBox(raycaster);
+          if (hitResult && hitResult.index !== undefined) {
+            setSelectedBox(hitResult.index);
+          }
+        }
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+      session.addEventListener("squeezestart", onSqueezeStart);
+      session.addEventListener("squeezeend", onSqueezeEnd);
       session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
+
+      const onEnd = () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        session.removeEventListener("squeezestart", onSqueezeStart);
+        session.removeEventListener("squeezeend", onSqueezeEnd);
+        session.removeEventListener("select", onSelect);
+      };
       session.addEventListener("end", onEnd);
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
     return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, boxRefs, setSelectedBox]);
+  }, [gl, boxRefs, setSelectedBox, updateBoxPosition]);
+
+  // Frame loop for drag updates
+  useFrame((state, delta, xrFrame) => {
+    if (!dragState.current.isDragging || !xrFrame) return;
+    
+    const session = gl.xr.getSession();
+    if (!session) return;
+
+    const { draggedIndex, startPosition, initialBoxPosition, inputSource } = dragState.current;
+    
+    if (draggedIndex === null || !initialBoxPosition) return;
+
+    // Get current controller/hand position
+    const refSpace = gl.xr.getReferenceSpace();
+    if (!refSpace || !inputSource) return;
+
+    try {
+      const pose = xrFrame.getPose(inputSource.targetRaySpace, refSpace);
+      if (!pose) return;
+
+      const currentPosition = new THREE.Vector3(
+        pose.transform.position.x,
+        pose.transform.position.y,
+        pose.transform.position.z
+      );
+
+      const direction = new THREE.Vector3(0, 0, -1);
+      const quaternion = new THREE.Quaternion(
+        pose.transform.orientation.x,
+        pose.transform.orientation.y,
+        pose.transform.orientation.z,
+        pose.transform.orientation.w
+      );
+      direction.applyQuaternion(quaternion);
+
+      // Calculate new position based on ray direction
+      // Project the box to a fixed distance from the controller
+      const distance = 2; // Distance from controller
+      const newWorldPosition = currentPosition.clone().add(direction.multiplyScalar(distance));
+
+      // Update the box position
+      const boxRef = boxRefs.current[draggedIndex];
+      if (boxRef) {
+        // Convert world position to local position (relative to parent group)
+        const parentGroup = boxRef.parent;
+        if (parentGroup) {
+          const localPosition = parentGroup.worldToLocal(newWorldPosition.clone());
+          boxRef.position.copy(localPosition);
+          
+          // Also update the state for persistence
+          updateBoxPosition(draggedIndex, [localPosition.x, localPosition.y, localPosition.z]);
+        }
+      }
+    } catch (e) {
+      // Silently handle XR frame errors
+    }
+  });
 
   return null;
 };
