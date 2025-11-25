@@ -13,10 +13,7 @@ import * as THREE from "three";
 /**
  * ARPage2
  * - AR-enabled version of VisualPage2 (singly linked list traversal)
- * - Auto-starts immersive-ar session if supported
- * - Supports AR "select" events via raycasting against node groups
- * - Supports whole structure drag and drop (long press to move)
- * - Also works with normal clicks (OrbitControls fallback)
+ * - With drag and drop for whole structure
  */
 const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
   const [selectedNode, setSelectedNode] = useState(null);
@@ -51,6 +48,24 @@ const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
     };
   }, []);
 
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setSelectedNode(null);
+    setHighlightedIndex(-1);
+    // Clear any ongoing traversal
+    traversalTimers.current.forEach((t) => clearTimeout(t));
+    traversalTimers.current = [];
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
+
   // traversal animation: highlight nodes from 0 to targetIndex
   const animateTraversal = useCallback(
     (targetIndex, stepMs = 500, onComplete) => {
@@ -80,21 +95,6 @@ const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
     []
   );
 
-  // Drag whole structure functions
-  const onDragStart = () => {
-    setIsDragging(true);
-    setSelectedNode(null);
-    setHighlightedIndex(-1);
-  };
-
-  const onDragMove = (newPos) => {
-    setStructurePos(newPos);
-  };
-
-  const onDragEnd = () => {
-    setIsDragging(false);
-  };
-
   // generate pseudo code (same style as VisualPage2)
   const generateCode = (index, value) =>
     [
@@ -122,7 +122,6 @@ const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
               requiredFeatures: ["hit-test", "local-floor"],
             });
           } else {
-            // not supported; silently ignore (OrbitControls will still work)
             return null;
           }
         })
@@ -174,7 +173,6 @@ const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
               selected={selectedNode === i}
               highlighted={i <= highlightedIndex}
               onClick={() => {
-                // Prevent selection while dragging
                 if (!isDragging) {
                   // on normal click (non-AR), animate traversal and set selectedNode after traversal
                   animateTraversal(i, 500, () =>
@@ -202,7 +200,6 @@ const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
           nodeRefs={nodeRefs}
           structureRef={structureRef}
           setSelectedNode={(idx) => {
-            // when AR select happens, run traversal animation then update selected
             if (idx === null || idx === undefined) return;
             animateTraversal(idx, 500, () =>
               setSelectedNode((prev) => (prev === idx ? null : idx))
@@ -220,11 +217,7 @@ const ARPage2 = ({ nodes = ["10", "20", "30", "40"], spacing = 6 }) => {
   );
 };
 
-/* AR Interaction Manager:
-   - Listens for XR 'select' events when session starts and uses raycasting
-   - Raycasts from the XR camera forward vector to intersect node groups
-   - Supports long press to drag whole structure
-*/
+/* AR Interaction Manager with Drag and Drop */
 const ARInteractionManager = ({ 
   nodeRefs, 
   structureRef,
@@ -325,7 +318,7 @@ const ARInteractionManager = ({
           // Drop structure at current position
           onDragEnd();
         } else if (touchedNode.current !== null && touchedNode.current >= 0) {
-          // Short tap on node - select it (with traversal animation)
+          // Short tap on node - trigger traversal animation
           setSelectedNode(touchedNode.current);
         }
 
@@ -367,10 +360,7 @@ const ARInteractionManager = ({
   return null;
 };
 
-/* Node3D component (forwardRef) - similar to VisualPage2 node
-   - attaches userData.nodeIndex to the group for AR raycast detection
-   - exposes onClick for non-AR clicks
-*/
+/* Node3D component (forwardRef) */
 const Node3D = forwardRef(({ index, value, position, isLast, selected, highlighted, onClick }, ref) => {
   const size = [4.5, 2, 1];
   const groupRef = useRef();
@@ -460,7 +450,7 @@ const NullCircle = ({ offset }) => (
   </group>
 );
 
-/* FadeText - fade-in text identical to VisualPage2 */
+/* FadeText */
 const FadeText = ({ text, fontSize = 0.5, color = "white", position = [0, 0, 0] }) => {
   const [opacity, setOpacity] = useState(0);
 
