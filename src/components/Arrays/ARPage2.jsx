@@ -101,8 +101,7 @@ const ARPage2 = ({ data = [10, 20, 30, 40, 50], spacing = 2.0 }) => {
             color={isDragging ? "#f97316" : "white"}
           />
 
-          {/* Background to show dragging state */}
-          <ArrayBackground data={data} spacing={spacing} isDragging={isDragging} />
+          {/* NO ArrayBackground - REMOVED */}
 
           {data.map((value, i) => (
             <Box
@@ -287,32 +286,6 @@ const ARInteractionManager = ({
   }, [gl, boxRefs, structureRef, setSelectedBox, onDragStart, onDragMove, onDragEnd]);
 
   return null;
-};
-
-// === Array Background ===
-const ArrayBackground = ({ data, spacing, isDragging }) => {
-  const width = Math.max(6, (data.length - 1) * spacing + 3);
-  const height = 2.4;
-  const boxGeo = useMemo(
-    () => new THREE.BoxGeometry(width, height, 0.06),
-    [width, height]
-  );
-  const edgesGeo = useMemo(() => new THREE.EdgesGeometry(boxGeo), [boxGeo]);
-
-  return (
-    <group position={[0, 0.9, -1]}>
-      <mesh geometry={boxGeo}>
-        <meshStandardMaterial 
-          color={isDragging ? "#1e3a5f" : "#0f172a"} 
-          emissive={isDragging ? "#f97316" : "#000000"}
-          emissiveIntensity={isDragging ? 0.2 : 0}
-        />
-      </mesh>
-      <lineSegments geometry={edgesGeo}>
-        <lineBasicMaterial color={isDragging ? "#f97316" : "#334155"} />
-      </lineSegments>
-    </group>
-  );
 };
 
 // === Box Component ===
