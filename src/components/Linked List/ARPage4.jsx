@@ -14,6 +14,10 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
   const [selectedNode, setSelectedNode] = useState(null);
   const [traversalProgress, setTraversalProgress] = useState(-1);
 
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, -3, -20]);
+  const [isDragging, setIsDragging] = useState(false);
+
   const positions = useMemo(() => {
     const n = nodes.length;
     return nodes.map((_, i) => {
@@ -23,6 +27,8 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
   }, [nodes, radius]);
 
   const nodeRefs = useRef([]);
+  const structureRef = useRef();
+  
   const addNodeRef = (r) => {
     if (!r) return;
     if (!nodeRefs.current.includes(r)) nodeRefs.current.push(r);
@@ -35,6 +41,24 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
       traversalTimers.current = [];
     };
   }, []);
+
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setSelectedNode(null);
+    setTraversalProgress(-1);
+    // Clear any ongoing traversal
+    traversalTimers.current.forEach((t) => clearTimeout(t));
+    traversalTimers.current = [];
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
 
   const animateTraversal = useCallback(
     (targetIndex, stepMs = 600, onComplete) => {
@@ -59,9 +83,11 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
   );
 
   const handleNodeClick = (i) => {
-    animateTraversal(i, 600, () =>
-      setSelectedNode((prev) => (prev === i ? null : i))
-    );
+    if (!isDragging) {
+      animateTraversal(i, 600, () =>
+        setSelectedNode((prev) => (prev === i ? null : i))
+      );
+    }
   };
 
   const generateCode = (index, value) =>
@@ -115,8 +141,8 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Main group moved 2 units closer: z = -22 */}
-        <group position={[0, -3, -20]}>
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
           <FadeText
             text="Circular Linked List (Circle Layout)"
             position={[0, 5, -2]}
@@ -124,10 +150,10 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
             color="#facc15"
           />
           <FadeText
-            text="Tap / Click a node to start traversal"
+            text={isDragging ? "✋ Moving Structure..." : "Tap / Click a node to start traversal"}
             position={[0, 4.2, -2]}
             fontSize={0.35}
-            color="white"
+            color={isDragging ? "#f97316" : "white"}
           />
 
           <Scene
@@ -137,9 +163,10 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
             traversalProgress={traversalProgress}
             handleNodeClick={handleNodeClick}
             addNodeRef={addNodeRef}
+            isDragging={isDragging}
           />
 
-          {selectedNode !== null && (
+          {selectedNode !== null && !isDragging && (
             <group position={[radius + 6, 1, 0]}>
               <FadeText
                 text={generateCode(selectedNode, nodes[selectedNode])}
@@ -152,14 +179,19 @@ const ARPage4 = ({ nodes = ["A", "B", "C", "D", "E", "F"], radius = 8 }) => {
 
         <ARInteractionManager
           nodeRefs={nodeRefs}
+          structureRef={structureRef}
           onNodeSelect={(idx) =>
             animateTraversal(idx, 600, () =>
               setSelectedNode((prev) => (prev === idx ? null : idx))
             )
           }
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
         />
 
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
@@ -172,6 +204,7 @@ const Scene = ({
   traversalProgress,
   handleNodeClick,
   addNodeRef,
+  isDragging,
 }) => (
   <>
     {nodes.map((val, idx) => (
@@ -184,6 +217,7 @@ const Scene = ({
         selected={selectedNode === idx}
         addNodeRef={addNodeRef}
         highlighted={traversalProgress >= idx}
+        isDragging={isDragging}
       />
     ))}
 
@@ -193,14 +227,14 @@ const Scene = ({
         start={positions[idx]}
         end={positions[(idx + 1) % nodes.length]}
         highlight={traversalProgress >= idx}
-        animate={traversalProgress >= idx}
+        animate={traversalProgress >= idx && !isDragging}
       />
     ))}
   </>
 );
 
 const CNode = forwardRef(
-  ({ value, index, position, selected, onClick, addNodeRef, highlighted }, ref) => {
+  ({ value, index, position, selected, onClick, addNodeRef, highlighted, isDragging }, ref) => {
     const size = [2.5, 2, 1];
     const groupRef = useRef();
 
@@ -288,27 +322,48 @@ const CurvedArrow = ({ start, end, highlight, animate }) => {
   );
 };
 
-const ARInteractionManager = ({ nodeRefs, onNodeSelect }) => {
+const ARInteractionManager = ({ 
+  nodeRefs, 
+  structureRef,
+  onNodeSelect,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedNode = useRef(null);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check if pointing at any node
+      const getHitNode = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
         const candidates = (nodeRefs.current || [])
           .map((g) => (g ? g.children : []))
           .flat();
+
         const intersects = raycaster.intersectObjects(candidates, true);
         if (intersects.length > 0) {
           let hit = intersects[0].object;
@@ -316,22 +371,96 @@ const ARInteractionManager = ({ nodeRefs, onNodeSelect }) => {
             hit = hit.parent;
           }
           const idx = hit?.userData?.nodeIndex;
-          if (idx !== undefined) onNodeSelect(idx);
+          if (idx !== undefined) {
+            return idx;
+          }
+          return -1; // Hit structure but not specific node
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (20 units in front)
+        const distance = 20;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitNode = getHitNode();
+        touchedNode.current = hitNode;
+
+        // If touching any part of structure, start long press for drag
+        if (hitNode !== null) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedNode.current !== null && touchedNode.current >= 0) {
+          // Short tap on node - trigger traversal animation
+          onNodeSelect(touchedNode.current);
+        }
+
+        touchedNode.current = null;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
+
     return () => {
       try {
         gl.xr.removeEventListener("sessionstart", onSessionStart);
       } catch (e) {}
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
     };
-  }, [gl, nodeRefs, onNodeSelect]);
+  }, [gl, nodeRefs, structureRef, onNodeSelect, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
