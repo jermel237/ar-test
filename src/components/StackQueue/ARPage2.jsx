@@ -9,8 +9,13 @@ const ARPage2 = () => {
   const [operationInfo, setOperationInfo] = useState(null);
   const [selectedButton, setSelectedButton] = useState(null);
 
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -8]);
+  const [isDragging, setIsDragging] = useState(false);
+
   const spacing = 1.6;
   const buttonRefs = useRef([]);
+  const structureRef = useRef();
 
   const addButtonRef = (r) => {
     if (r && !buttonRefs.current.includes(r)) buttonRefs.current.push(r);
@@ -18,16 +23,33 @@ const ARPage2 = () => {
 
   const positions = useMemo(
     () => stack.map((_, i) => [0, i * spacing, 0]),
-    [stack]
+    [stack, spacing]
   );
+
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setOperationInfo(null);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
 
   // === Utility ===
   const showOperationInfo = (title, complexity, description) => {
-    setOperationInfo({ title, complexity, description });
+    if (!isDragging) {
+      setOperationInfo({ title, complexity, description });
+    }
   };
 
   // === Stack Operations ===
   const handlePush = () => {
+    if (isDragging) return;
     const newVal = Math.floor(Math.random() * 90) + 10;
     setStack((prev) => [...prev, newVal]);
     showOperationInfo(
@@ -38,6 +60,7 @@ const ARPage2 = () => {
   };
 
   const handlePop = () => {
+    if (isDragging) return;
     if (stack.length === 0) return;
     setStack((prev) => prev.slice(0, -1));
     showOperationInfo(
@@ -48,6 +71,7 @@ const ARPage2 = () => {
   };
 
   const handlePeek = () => {
+    if (isDragging) return;
     if (stack.length === 0) return;
     const topIndex = stack.length - 1;
     setHighlighted(topIndex);
@@ -91,8 +115,8 @@ const ARPage2 = () => {
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Stack group */}
-        <group position={[0, 0, -8]}>
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
           <FadeInText
             show={true}
             text={"Stack Operations & Complexity"}
@@ -101,7 +125,18 @@ const ARPage2 = () => {
             color="white"
           />
 
-          <StackBackground height={stack.length * spacing + 2} />
+          {/* Dragging indicator */}
+          {isDragging && (
+            <FadeInText
+              show={true}
+              text={"✋ Moving Structure..."}
+              position={[5, 4.3, 0]}
+              fontSize={0.4}
+              color="#f97316"
+            />
+          )}
+
+          <StackBackground height={stack.length * spacing + 2} isDragging={isDragging} />
 
           {stack.map((value, i) => (
             <StackBox
@@ -114,48 +149,76 @@ const ARPage2 = () => {
             />
           ))}
 
-          {operationInfo && (
+          {operationInfo && !isDragging && (
             <OperationInfoPanel info={operationInfo} position={[-6, 2, 0]} />
           )}
 
-          <OperationsPanelAR
-            position={[5, 2, 0]}
-            onPush={handlePush}
-            onPop={handlePop}
-            onPeek={handlePeek}
-            addButtonRef={addButtonRef}
-            selectedButton={selectedButton}
-          />
+          {!isDragging && (
+            <OperationsPanelAR
+              position={[5, 2, 0]}
+              onPush={handlePush}
+              onPop={handlePop}
+              onPeek={handlePeek}
+              addButtonRef={addButtonRef}
+              selectedButton={selectedButton}
+            />
+          )}
         </group>
 
         <ARInteractionManager
           buttonRefs={buttonRefs}
+          structureRef={structureRef}
           setSelectedButton={setSelectedButton}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
         />
 
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
-// === AR Interaction Manager ===
-const ARInteractionManager = ({ buttonRefs, setSelectedButton }) => {
+// === AR Interaction Manager with Drag and Drop ===
+const ARInteractionManager = ({ 
+  buttonRefs, 
+  structureRef,
+  setSelectedButton,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedButton = useRef(null);
+  const touchedStructure = useRef(false);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check what we hit
+      const getHitInfo = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
         const candidates = (buttonRefs.current || [])
@@ -169,24 +232,111 @@ const ARInteractionManager = ({ buttonRefs, setSelectedButton }) => {
             hit = hit.parent;
           }
           const action = hit?.userData?.btnAction;
-          if (action) setSelectedButton(action);
+          if (action) {
+            return { type: 'button', action };
+          }
+          return { type: 'structure' };
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (8 units in front)
+        const distance = 8;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitInfo = getHitInfo();
+        
+        if (hitInfo?.type === 'button') {
+          touchedButton.current = hitInfo.action;
+          touchedStructure.current = true;
+        } else if (hitInfo !== null) {
+          touchedStructure.current = true;
+          touchedButton.current = null;
+        } else {
+          touchedStructure.current = false;
+          touchedButton.current = null;
+        }
+
+        // If touching any part of structure, start long press for drag
+        if (touchedStructure.current) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedButton.current) {
+          // Short tap on button - trigger action
+          setSelectedButton(touchedButton.current);
+        }
+
+        touchedButton.current = null;
+        touchedStructure.current = false;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, buttonRefs, setSelectedButton]);
+
+    return () => {
+      gl.xr.removeEventListener("sessionstart", onSessionStart);
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
+    };
+  }, [gl, buttonRefs, structureRef, setSelectedButton, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
 
 // === Stack Background ===
-const StackBackground = ({ height }) => {
+const StackBackground = ({ height, isDragging }) => {
   const geometry = useMemo(
     () => new THREE.BoxGeometry(3.5, height, 0.08),
     [height]
@@ -196,10 +346,17 @@ const StackBackground = ({ height }) => {
   return (
     <group position={[0, height / 2 - 1, -0.5]}>
       <mesh geometry={geometry}>
-        1q <meshBasicMaterial color="#1e293b" opacity={0.3} transparent />
+        <meshBasicMaterial 
+          color={isDragging ? "#1e3a5f" : "#1e293b"} 
+          opacity={0.3} 
+          transparent 
+        />
       </mesh>
       <lineSegments geometry={edges}>
-        <lineBasicMaterial color="#64748b" linewidth={2} />
+        <lineBasicMaterial 
+          color={isDragging ? "#f97316" : "#64748b"} 
+          linewidth={2} 
+        />
       </lineSegments>
     </group>
   );
@@ -303,7 +460,7 @@ const OperationsPanelAR = ({
       if (selectedButton === "peek") onPeek();
       setTimeout(() => setActiveButton(null), 400);
     }
-  }, [selectedButton]);
+  }, [selectedButton, onPush, onPop, onPeek]);
 
   const renderButton = (label, action, y) => {
     const isActive = activeButton === action;
