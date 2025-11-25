@@ -5,6 +5,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import useSound from "use-sound";
 import dingSfx from "/sounds/ding.mp3"; // ensure this exists in /public/sounds/
+import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
   // Search state
@@ -90,23 +91,8 @@ const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
   };
 
   // Auto-start WebXR AR session when possible
-  const startAR = (gl) => {
-    if (navigator.xr) {
-      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
-        if (supported) {
-          navigator.xr
-            .requestSession("immersive-ar", {
-              requiredFeatures: ["hit-test", "local-floor"],
-            })
-            .then((session) => {
-              gl.xr.setSession(session);
-            })
-            .catch((err) => console.error("AR session failed:", err));
-        } else {
-          console.warn("AR not supported on this device.");
-        }
-      });
-    }
+  const startAR = async (gl) => {
+    await initARSession(gl);
   };
 
   return (
@@ -174,6 +160,11 @@ const ARInteractionManager = ({ boxRefs, startSearch }) => {
   const { gl } = useThree();
 
   useEffect(() => {
+    // Skip AR session setup on iOS
+    if (isIOS()) {
+      return;
+    }
+
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
