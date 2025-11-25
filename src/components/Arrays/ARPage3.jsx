@@ -1,10 +1,10 @@
 // ARPage3.jsx
 import React, { useMemo, useState, useRef, useEffect, forwardRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import { Text, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import useSound from "use-sound";
-import dingSfx from "/sounds/ding.mp3"; // ensure this exists in /public/sounds/
+import dingSfx from "/sounds/ding.mp3";
 
 const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
   // Search state
@@ -17,6 +17,10 @@ const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
   const [pseudoCode, setPseudoCode] = useState([]);
   const [play] = useSound(dingSfx, { volume: 0.5 });
 
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -10]);
+  const [isDragging, setIsDragging] = useState(false);
+
   // Positions computed once
   const positions = useMemo(() => {
     const mid = (data.length - 1) / 2;
@@ -25,13 +29,28 @@ const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
 
   // refs for AR raycasting (groups)
   const boxRefs = useRef([]);
+  const structureRef = useRef();
+  
   const addBoxRef = (r) => {
     if (r && !boxRefs.current.includes(r)) boxRefs.current.push(r);
   };
 
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
+
   // === Linear search animation ===
   const startSearch = (targetIndex) => {
-    if (searching) return;
+    if (searching || isDragging) return;
     setSearching(true);
     setHighlightIndex(null);
     setFoundIndex(null);
@@ -121,22 +140,40 @@ const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 8, 5]} intensity={0.8} />
 
-        {/* Title */}
-        <FadeText text="Search Operation (Linear Search)" position={[0, 3, -8]} fontSize={0.55} color="white" />
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
+          {/* Title */}
+          <FadeText 
+            text="Search Operation (Linear Search)" 
+            position={[0, 3, 2]} 
+            fontSize={0.55} 
+            color="white" 
+          />
 
-        {/* Instruction */}
-        <FadeText
-          text={!searching && !foundIndex && !infoText ? "Tap any box to start searching..." : ""}
-          position={[0, 2.4, -8]}
-          fontSize={0.3}
-          color="#ffd166"
-        />
+          {/* Instruction or Dragging indicator */}
+          <FadeText
+            text={
+              isDragging 
+                ? "✋ Moving Structure..." 
+                : !searching && !foundIndex && !infoText 
+                  ? "Tap any box to start searching..." 
+                  : ""
+            }
+            position={[0, 2.4, 2]}
+            fontSize={0.3}
+            color={isDragging ? "#f97316" : "#ffd166"}
+          />
 
-        {/* Transition label */}
-        <FadeText showText={!!statusText} text={statusText} position={[0, 2, -8]} fontSize={0.32} color="#ffd166" />
+          {/* Transition label */}
+          <FadeText 
+            showText={!!statusText && !isDragging} 
+            text={statusText} 
+            position={[0, 2, 2]} 
+            fontSize={0.32} 
+            color="#ffd166" 
+          />
 
-        {/* Boxes */}
-        <group position={[0, 0, -10]}>
+          {/* Boxes */}
           {data.map((value, i) => (
             <Box
               key={i}
@@ -145,71 +182,194 @@ const ARPage3 = ({ data = [5, 10, 15, 20, 25], spacing = 2.0 }) => {
               position={positions[i]}
               highlight={highlightIndex === i}
               found={foundIndex === i}
-              disabled={searching}
+              disabled={searching || isDragging}
               onClick={() => startSearch(i)}
               ref={(r) => addBoxRef(r)}
             />
           ))}
 
           {/* Info / pseudo code to the right when search finishes */}
-          {showCode && (
+          {showCode && !isDragging && (
             <group position={[8, 1.2, 0]}>
               <FadeText text={infoText} position={[0, 0.8, 0]} fontSize={0.35} color="#9be7a2" />
               {pseudoCode.map((line, idx) => (
-                <FadeText key={idx} text={line} position={[0, 0.4 - idx * 0.35, 0]} fontSize={0.28} color={line.startsWith("//") ? "#9be7a2" : "#ffeb99"} />
+                <FadeText 
+                  key={idx} 
+                  text={line} 
+                  position={[0, 0.4 - idx * 0.35, 0]} 
+                  fontSize={0.28} 
+                  color={line.startsWith("//") ? "#9be7a2" : "#ffeb99"} 
+                />
               ))}
             </group>
           )}
         </group>
 
-        {/* AR Interaction Manager handles XR select events and maps them to startSearch */}
-        <ARInteractionManager boxRefs={boxRefs} startSearch={startSearch} />
+        {/* AR Interaction Manager handles XR select events */}
+        <ARInteractionManager 
+          boxRefs={boxRefs} 
+          structureRef={structureRef}
+          startSearch={startSearch}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          searching={searching}
+        />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
 // === ARInteractionManager ===
-const ARInteractionManager = ({ boxRefs, startSearch }) => {
+const ARInteractionManager = ({ 
+  boxRefs, 
+  structureRef,
+  startSearch,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  searching
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedBox = useRef(null);
+  const isDraggingRef = useRef(false);
+  const searchingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
+
+  useEffect(() => {
+    searchingRef.current = searching;
+  }, [searching]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-
         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check if pointing at any box
+      const getHitBox = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
-        const candidates = (boxRefs.current || []).map((group) => (group ? group.children : [])).flat();
-        const intersects = raycaster.intersectObjects(candidates, true);
-        if (intersects.length > 0) {
-          let hit = intersects[0].object;
-          while (hit && hit.userData?.boxIndex === undefined && hit.parent) {
-            hit = hit.parent;
+        const allMeshes = [];
+        boxRefs.current.forEach((group) => {
+          if (group && group.children) {
+            group.children.forEach((child) => {
+              allMeshes.push(child);
+            });
           }
-          const idx = hit?.userData?.boxIndex;
-          if (idx !== undefined) {
-            // trigger the linear search animation towards idx
-            startSearch(idx);
+        });
+
+        const hits = raycaster.intersectObjects(allMeshes, true);
+        if (hits.length > 0) {
+          let obj = hits[0].object;
+          while (obj) {
+            if (obj.userData?.boxIndex !== undefined) {
+              return obj.userData.boxIndex;
+            }
+            obj = obj.parent;
           }
+          return -1; // Hit structure but not specific box
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (10 units in front)
+        const distance = 10;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitBox = getHitBox();
+        touchedBox.current = hitBox;
+
+        // If touching any part of structure and not searching, start long press for drag
+        if (hitBox !== null && !searchingRef.current) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedBox.current !== null && touchedBox.current >= 0 && !searchingRef.current) {
+          // Short tap on box - start search
+          startSearch(touchedBox.current);
+        }
+
+        touchedBox.current = null;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, boxRefs, startSearch]);
+
+    return () => {
+      gl.xr.removeEventListener("sessionstart", onSessionStart);
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
+    };
+  }, [gl, boxRefs, structureRef, startSearch, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
@@ -217,12 +377,13 @@ const ARInteractionManager = ({ boxRefs, startSearch }) => {
 // === Box ===
 const Box = forwardRef(({ index, value, position, highlight, found, disabled, onClick }, ref) => {
   const meshRef = useRef();
+  const groupRef = useRef();
   const size = [1.6, 1.2, 1];
 
   useEffect(() => {
     // attach index to group for raycasting detection
-    if (meshRef.current && meshRef.current.parent) {
-      meshRef.current.parent.userData = { boxIndex: index };
+    if (groupRef.current) {
+      groupRef.current.userData = { boxIndex: index };
     }
   }, [index]);
 
@@ -242,11 +403,11 @@ const Box = forwardRef(({ index, value, position, highlight, found, disabled, on
     <group
       position={position}
       ref={(g) => {
+        groupRef.current = g;
         if (typeof ref === "function") ref(g);
         else if (ref) ref.current = g;
       }}
       onClick={!disabled ? onClick : undefined}
-      style={{ cursor: disabled ? "default" : "pointer" }}
     >
       <mesh ref={meshRef} castShadow receiveShadow position={[0, size[1] / 2, 0]}>
         <boxGeometry args={size} />
@@ -282,7 +443,16 @@ const FadeText = ({ text = "", position = [0, 0, 0], fontSize = 0.5, color = "wh
   }, [showText]);
 
   return (
-    <Text position={position} fontSize={fontSize} color={color} anchorX="center" anchorY="middle" fillOpacity={opacity} maxWidth={10} textAlign="left">
+    <Text 
+      position={position} 
+      fontSize={fontSize} 
+      color={color} 
+      anchorX="center" 
+      anchorY="middle" 
+      fillOpacity={opacity} 
+      maxWidth={10} 
+      textAlign="left"
+    >
       {text}
     </Text>
   );
