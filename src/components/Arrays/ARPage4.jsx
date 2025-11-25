@@ -1,8 +1,8 @@
-// ARPage4.jsx (FINAL VERSION WITH NUMBERS IN FRONT)
+// ARPage4.jsx (WITH DRAG AND DROP)
 
 import React, { useMemo, useState, useRef, useEffect, forwardRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import { Text, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import useSound from "use-sound";
 import dingSfx from "/sounds/ding.mp3";
@@ -14,14 +14,32 @@ const ARPage4 = ({ spacing = 2.2 }) => {
   const [pseudoCode, setPseudoCode] = useState([]);
   const [highlightIndex, setHighlightIndex] = useState(null);
   const boxRefs = useRef([]);
+  const structureRef = useRef();
   const [play] = useSound(dingSfx, { volume: 0.5 });
+
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -8]);
+  const [isDragging, setIsDragging] = useState(false);
 
   const addBoxRef = (r) => {
     if (r && !boxRefs.current.includes(r)) boxRefs.current.push(r);
   };
 
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
+
   const handleAppend = () => {
-    if (data.length >= MAX_INDEX) return;
+    if (data.length >= MAX_INDEX || isDragging) return;
 
     const newValue = Math.floor(Math.random() * 90) + 10;
 
@@ -79,8 +97,24 @@ const ARPage4 = ({ spacing = 2.2 }) => {
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        <group position={[0, 0, -8]}>
-          <FadeText text="Insertion Operation" position={[0, 3, -2]} fontSize={0.6} color="#eeeeeeff" />
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
+          <FadeText 
+            text="Insertion Operation" 
+            position={[0, 3, -2]} 
+            fontSize={0.6} 
+            color="#eeeeeeff" 
+          />
+
+          {/* Dragging indicator */}
+          {isDragging && (
+            <FadeText
+              text="✋ Moving Structure..."
+              position={[0, 2.3, -2]}
+              fontSize={0.4}
+              color="#f97316"
+            />
+          )}
 
           {data.map((value, i) => (
             <Box
@@ -93,7 +127,7 @@ const ARPage4 = ({ spacing = 2.2 }) => {
             />
           ))}
 
-          {data.length < MAX_INDEX && (
+          {data.length < MAX_INDEX && !isDragging && (
             <AppendBox
               index={data.length}
               position={[((data.length - 1) / 2) * spacing + spacing, 0, 0]}
@@ -102,7 +136,7 @@ const ARPage4 = ({ spacing = 2.2 }) => {
             />
           )}
 
-          {pseudoCode.length > 0 &&
+          {pseudoCode.length > 0 && !isDragging &&
             pseudoCode.map((line, i) => (
               <FadeText
                 key={i}
@@ -122,44 +156,159 @@ const ARPage4 = ({ spacing = 2.2 }) => {
             ))}
         </group>
 
-        <ARInteractionManager boxRefs={boxRefs} handleAppend={handleAppend} />
+        <ARInteractionManager 
+          boxRefs={boxRefs} 
+          structureRef={structureRef}
+          handleAppend={handleAppend}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+        />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
 /* ---------------- AR Interaction Manager ---------------- */
-const ARInteractionManager = ({ boxRefs, handleAppend }) => {
+const ARInteractionManager = ({ 
+  boxRefs, 
+  structureRef,
+  handleAppend,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedAppend = useRef(false);
+  const touchedStructure = useRef(false);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
-        raycaster.set(origin, dir.normalize());
+        return { origin, dir };
+      };
 
-        const candidates = (boxRefs.current || []).map((group) => group.children).flat();
+      // Check what we hit
+      const getHitInfo = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
+        raycaster.set(origin, dir);
+
+        const candidates = (boxRefs.current || []).map((group) => group?.children || []).flat();
         const intersects = raycaster.intersectObjects(candidates, true);
+        
         if (intersects.length > 0) {
           const target = intersects[0].object.parent;
-          if (target.userData?.isAppend) handleAppend();
+          if (target?.userData?.isAppend) {
+            return { type: 'append' };
+          }
+          if (target?.userData?.boxIndex !== undefined) {
+            return { type: 'box', index: target.userData.boxIndex };
+          }
+          return { type: 'structure' };
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (8 units in front)
+        const distance = 8;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitInfo = getHitInfo();
+        touchedAppend.current = hitInfo?.type === 'append';
+        touchedStructure.current = hitInfo !== null;
+
+        // If touching any part of structure, start long press for drag
+        if (hitInfo !== null) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      return () => session.removeEventListener("select", onSelect);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedAppend.current) {
+          // Short tap on append button
+          handleAppend();
+        }
+
+        touchedAppend.current = false;
+        touchedStructure.current = false;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, boxRefs, handleAppend]);
+
+    return () => {
+      gl.xr.removeEventListener("sessionstart", onSessionStart);
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
+    };
+  }, [gl, boxRefs, structureRef, handleAppend, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
