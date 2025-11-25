@@ -9,20 +9,42 @@ const ARPage4 = () => {
   const [operationInfo, setOperationInfo] = useState(null);
   const [selectedButton, setSelectedButton] = useState(null);
   const buttonRefs = useRef([]);
+  const structureRef = useRef();
+
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -6]);
+  const [isDragging, setIsDragging] = useState(false);
 
   const spacing = 2;
 
   const positions = useMemo(
     () => queue.map((_, i) => [i * spacing, 0, 0]),
-    [queue]
+    [queue, spacing]
   );
 
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setOperationInfo(null);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
+
   const showOperationInfo = (title, complexity, description) => {
-    setOperationInfo({ title, complexity, description });
+    if (!isDragging) {
+      setOperationInfo({ title, complexity, description });
+    }
   };
 
   // === Queue Operations ===
   const handleEnqueue = () => {
+    if (isDragging) return;
     const newVal = Math.floor(Math.random() * 90) + 10;
     setQueue((prev) => [...prev, newVal]);
     showOperationInfo(
@@ -33,6 +55,7 @@ const ARPage4 = () => {
   };
 
   const handleDequeue = () => {
+    if (isDragging) return;
     if (queue.length === 0) return;
     setHighlighted(0);
     setTimeout(() => {
@@ -47,6 +70,7 @@ const ARPage4 = () => {
   };
 
   const handlePeek = () => {
+    if (isDragging) return;
     if (queue.length === 0) return;
     setHighlighted(0);
     showOperationInfo(
@@ -91,8 +115,8 @@ const ARPage4 = () => {
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Queue Visualization */}
-        <group position={[0, 0, -6]}>
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
           <FadeInText
             show={true}
             text={"Queue Operations & Complexity"}
@@ -103,13 +127,13 @@ const ARPage4 = () => {
 
           <FadeInText
             show={true}
-            text={"Each operation has constant time complexity — O(1)"}
+            text={isDragging ? "✋ Moving Structure..." : "Each operation has constant time complexity — O(1)"}
             position={[0, 3.8, 0]}
             fontSize={0.35}
-            color="#fde68a"
+            color={isDragging ? "#f97316" : "#fde68a"}
           />
 
-          <QueueBase width={queue.length * spacing + 2} />
+          <QueueBase width={queue.length * spacing + 2} isDragging={isDragging} />
 
           {queue.map((value, i) => (
             <QueueBox
@@ -122,21 +146,23 @@ const ARPage4 = () => {
             />
           ))}
 
-          {operationInfo && (
+          {operationInfo && !isDragging && (
             <OperationInfoPanel info={operationInfo} position={[-6, 1.5, 0]} />
           )}
 
-          <OperationsPanel
-            position={[6, 1.5, 0]}
-            onEnqueue={handleEnqueue}
-            onDequeue={handleDequeue}
-            onPeek={handlePeek}
-            addButtonRef={addButtonRef}
-            selectedButton={selectedButton}
-          />
+          {!isDragging && (
+            <OperationsPanel
+              position={[6, 1.5, 0]}
+              onEnqueue={handleEnqueue}
+              onDequeue={handleDequeue}
+              onPeek={handlePeek}
+              addButtonRef={addButtonRef}
+              selectedButton={selectedButton}
+            />
+          )}
 
           <FadeInText
-            show={true}
+            show={!isDragging}
             text={"Queues process elements in the order they arrive (FIFO)."}
             position={[0, -2.5, 0]}
             fontSize={0.35}
@@ -146,41 +172,64 @@ const ARPage4 = () => {
 
         <ARInteractionManager
           buttonRefs={buttonRefs}
+          structureRef={structureRef}
           setSelectedButton={setSelectedButton}
           handleEnqueue={handleEnqueue}
           handleDequeue={handleDequeue}
           handlePeek={handlePeek}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
         />
 
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
-// === AR Interaction Manager ===
+// === AR Interaction Manager with Drag and Drop ===
 const ARInteractionManager = ({
   buttonRefs,
+  structureRef,
   setSelectedButton,
   handleEnqueue,
   handleDequeue,
   handlePeek,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
 }) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedButton = useRef(null);
+  const touchedStructure = useRef(false);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check what we hit
+      const getHitInfo = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
         const candidates = (buttonRefs.current || [])
@@ -193,37 +242,136 @@ const ARInteractionManager = ({
           while (hit && hit.userData?.action === undefined && hit.parent) {
             hit = hit.parent;
           }
-
           const action = hit?.userData?.action;
           if (action) {
-            setSelectedButton(action);
-            if (action === "enqueue") handleEnqueue();
-            else if (action === "dequeue") handleDequeue();
-            else if (action === "peek") handlePeek();
+            return { type: 'button', action };
           }
+          return { type: 'structure' };
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (6 units in front)
+        const distance = 6;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitInfo = getHitInfo();
+        
+        if (hitInfo?.type === 'button') {
+          touchedButton.current = hitInfo.action;
+          touchedStructure.current = true;
+        } else if (hitInfo !== null) {
+          touchedStructure.current = true;
+          touchedButton.current = null;
+        } else {
+          touchedStructure.current = false;
+          touchedButton.current = null;
+        }
+
+        // If touching any part of structure, start long press for drag
+        if (touchedStructure.current) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedButton.current) {
+          // Short tap on button - trigger action
+          const action = touchedButton.current;
+          setSelectedButton(action);
+          if (action === "enqueue") handleEnqueue();
+          else if (action === "dequeue") handleDequeue();
+          else if (action === "peek") handlePeek();
+        }
+
+        touchedButton.current = null;
+        touchedStructure.current = false;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, buttonRefs, setSelectedButton]);
+
+    return () => {
+      gl.xr.removeEventListener("sessionstart", onSessionStart);
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
+    };
+  }, [gl, buttonRefs, structureRef, setSelectedButton, handleEnqueue, handleDequeue, handlePeek, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
 
 // === Queue Base ===
-const QueueBase = ({ width }) => {
+const QueueBase = ({ width, isDragging }) => {
   const geometry = useMemo(() => new THREE.BoxGeometry(width, 0.2, 2), [width]);
+  const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+  
   return (
-    <mesh position={[width / 2 - 2, -0.1, 0]}>
-      <primitive object={geometry} />
-      <meshBasicMaterial color="#1e293b" opacity={0.3} transparent />
-    </mesh>
+    <group position={[width / 2 - 2, -0.1, 0]}>
+      <mesh>
+        <primitive object={geometry} />
+        <meshBasicMaterial 
+          color={isDragging ? "#1e3a5f" : "#1e293b"} 
+          opacity={0.3} 
+          transparent 
+        />
+      </mesh>
+      <lineSegments geometry={edges}>
+        <lineBasicMaterial 
+          color={isDragging ? "#f97316" : "#64748b"} 
+          linewidth={2} 
+        />
+      </lineSegments>
+    </group>
   );
 };
 
@@ -312,18 +460,34 @@ const OperationsPanel = ({
   onDequeue,
   onPeek,
   addButtonRef,
+  selectedButton,
 }) => {
-  const renderButton = (label, action, y, callback) => (
-    <group position={[0, y, 0]} ref={addButtonRef} userData={{ action }}>
-      <mesh onClick={callback} castShadow receiveShadow>
-        <boxGeometry args={[2.8, 0.6, 0.1]} />
-        <meshStandardMaterial color="#38bdf8" />
-      </mesh>
-      <Text position={[0, 0, 0.06]} fontSize={0.35} color="white">
-        {label}
-      </Text>
-    </group>
-  );
+  const [activeButton, setActiveButton] = useState(null);
+
+  useEffect(() => {
+    if (selectedButton) {
+      setActiveButton(selectedButton);
+      const t = setTimeout(() => setActiveButton(null), 300);
+      return () => clearTimeout(t);
+    }
+  }, [selectedButton]);
+
+  const renderButton = (label, action, y, callback) => {
+    const isActive = activeButton === action;
+    const color = isActive ? "#22c55e" : "#38bdf8";
+
+    return (
+      <group position={[0, y, 0]} ref={addButtonRef} userData={{ action }}>
+        <mesh onClick={callback} castShadow receiveShadow userData={{ action }}>
+          <boxGeometry args={[2.8, 0.6, 0.1]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <Text position={[0, 0, 0.06]} fontSize={0.35} color="white" anchorX="center" anchorY="middle">
+          {label}
+        </Text>
+      </group>
+    );
+  };
 
   return (
     <group position={position}>
