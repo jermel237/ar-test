@@ -10,22 +10,45 @@ const ARPage3 = () => {
   const [operationInfo, setOperationInfo] = useState(null);
   const [selectedButton, setSelectedButton] = useState(null);
   const buttonRefs = useRef([]);
+  const structureRef = useRef();
+
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -8]);
+  const [isDragging, setIsDragging] = useState(false);
 
   const spacing = 2;
-  const positions = useMemo(() => queue.map((_, i) => [i * spacing, 0, 0]), [queue]);
+  const positions = useMemo(() => queue.map((_, i) => [i * spacing, 0, 0]), [queue, spacing]);
+
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setOperationInfo(null);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
 
   const showOperationInfo = (title, complexity, description) => {
-    setOperationInfo({ title, complexity, description });
+    if (!isDragging) {
+      setOperationInfo({ title, complexity, description });
+    }
   };
 
   // === Queue Operations ===
   const handleEnqueue = () => {
+    if (isDragging) return;
     const newVal = Math.floor(Math.random() * 90) + 10;
     setQueue((prev) => [...prev, newVal]);
     showOperationInfo("Enqueue()", "O(1)", "Adds an element to the rear of the queue.");
   };
 
   const handleDequeue = () => {
+    if (isDragging) return;
     if (queue.length === 0) return;
     setHighlighted(0);
     setTimeout(() => {
@@ -45,7 +68,6 @@ const ARPage3 = () => {
             .then((session) => gl.xr.setSession(session))
             .catch((err) => console.error("AR session failed:", err));
         } else {
-          // not required, just informative
           console.warn("immersive-ar not supported");
         }
       });
@@ -58,7 +80,7 @@ const ARPage3 = () => {
     if (!buttonRefs.current.includes(r)) buttonRefs.current.push(r);
   };
 
-  // clear refs when queue changes (avoid stale refs if component remounts)
+  // clear refs when queue changes
   useEffect(() => {
     return () => {
       buttonRefs.current = [];
@@ -77,14 +99,26 @@ const ARPage3 = () => {
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Headers & whole scene */}
-        <FadeInText show text={"Introduction to Queues"} position={[0, 4.5, -8]} fontSize={0.55} color="white" />
-        <FadeInText show text={"FIFO (First In, First Out) Principle"} position={[0, 3.7, 0]} fontSize={0.35} color="#fde68a" />
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
+          {/* Headers */}
+          <FadeInText 
+            show 
+            text={"Introduction to Queues"} 
+            position={[0, 4.5, 0]} 
+            fontSize={0.55} 
+            color="white" 
+          />
+          <FadeInText 
+            show 
+            text={isDragging ? "✋ Moving Structure..." : "FIFO (First In, First Out) Principle"} 
+            position={[0, 3.7, 0]} 
+            fontSize={0.35} 
+            color={isDragging ? "#f97316" : "#fde68a"} 
+          />
 
-        {/* Move queue group back to z = -9 */}
-        <group position={[0, 0, -8]}>
           {/* Queue Base and Boxes */}
-          <QueueBase width={queue.length * spacing + 2} />
+          <QueueBase width={queue.length * spacing + 2} isDragging={isDragging} />
 
           {queue.map((value, i) => (
             <QueueBox
@@ -98,50 +132,89 @@ const ARPage3 = () => {
           ))}
 
           {/* Operation Info Panel (left) */}
-          {operationInfo && <OperationInfoPanel info={operationInfo} position={[-6, 1.5, 0]} />}
+          {operationInfo && !isDragging && (
+            <OperationInfoPanel info={operationInfo} position={[-6, 1.5, 0]} />
+          )}
 
-          {/* Operations Panel (right) — buttons are added via addButtonRef */}
-          <OperationsPanel
-            position={[6, 1.5, 0]}
-            onEnqueue={handleEnqueue}
-            onDequeue={handleDequeue}
-            addButtonRef={addButtonRef}
-            selectedButton={selectedButton}
+          {/* Operations Panel (right) */}
+          {!isDragging && (
+            <OperationsPanel
+              position={[6, 1.5, 0]}
+              onEnqueue={handleEnqueue}
+              onDequeue={handleDequeue}
+              addButtonRef={addButtonRef}
+              selectedButton={selectedButton}
+            />
+          )}
+
+          <FadeInText 
+            show={!isDragging} 
+            text={"Real-Life Example: A line at the ticket counter —\nfirst person served first."} 
+            position={[0, -2.5, 0]} 
+            fontSize={0.3} 
+            color="#a5f3fc" 
           />
-
-          <FadeInText show text={"Real-Life Example: A line at the ticket counter —\nfirst person served first."} position={[0, -2.5, 0]} fontSize={0.3} color="#a5f3fc" />
         </group>
 
-        {/* AR Interaction Manager reads buttonRefs and triggers actions */}
+        {/* AR Interaction Manager */}
         <ARInteractionManager
           buttonRefs={buttonRefs}
+          structureRef={structureRef}
           setSelectedButton={setSelectedButton}
           handleEnqueue={handleEnqueue}
           handleDequeue={handleDequeue}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
         />
 
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
-// === AR Interaction Manager ===
-const ARInteractionManager = ({ buttonRefs, setSelectedButton, handleEnqueue, handleDequeue }) => {
+// === AR Interaction Manager with Drag and Drop ===
+const ARInteractionManager = ({ 
+  buttonRefs, 
+  structureRef,
+  setSelectedButton, 
+  handleEnqueue, 
+  handleDequeue,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedButton = useRef(null);
+  const touchedStructure = useRef(false);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
-        // cast a ray from the XR camera forward
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check what we hit
+      const getHitInfo = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
         const candidates = (buttonRefs.current || [])
@@ -151,32 +224,115 @@ const ARInteractionManager = ({ buttonRefs, setSelectedButton, handleEnqueue, ha
 
         const intersects = raycaster.intersectObjects(candidates, true);
         if (intersects.length > 0) {
-          // find parent group that has userData.action
           let hit = intersects[0].object;
           while (hit && hit.userData?.action === undefined && hit.parent) {
             hit = hit.parent;
           }
           const action = hit?.userData?.action;
           if (action) {
-            setSelectedButton(action);
-            if (action === "enqueue") handleEnqueue();
-            else if (action === "dequeue") handleDequeue();
+            return { type: 'button', action };
           }
+          return { type: 'structure' };
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (8 units in front)
+        const distance = 8;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitInfo = getHitInfo();
+        
+        if (hitInfo?.type === 'button') {
+          touchedButton.current = hitInfo.action;
+          touchedStructure.current = true;
+        } else if (hitInfo !== null) {
+          touchedStructure.current = true;
+          touchedButton.current = null;
+        } else {
+          touchedStructure.current = false;
+          touchedButton.current = null;
+        }
+
+        // If touching any part of structure, start long press for drag
+        if (touchedStructure.current) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedButton.current) {
+          // Short tap on button - trigger action
+          const action = touchedButton.current;
+          setSelectedButton(action);
+          if (action === "enqueue") handleEnqueue();
+          else if (action === "dequeue") handleDequeue();
+        }
+
+        touchedButton.current = null;
+        touchedStructure.current = false;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
+
     return () => {
       try {
         gl.xr.removeEventListener("sessionstart", onSessionStart);
       } catch (e) {}
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
     };
-  }, [gl, buttonRefs, setSelectedButton]);
+  }, [gl, buttonRefs, structureRef, setSelectedButton, handleEnqueue, handleDequeue, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
@@ -233,13 +389,27 @@ const QueueBox = ({ value, position, isFront, isRear, highlight }) => {
 };
 
 // === QueueBase ===
-const QueueBase = ({ width }) => {
+const QueueBase = ({ width, isDragging }) => {
   const geometry = useMemo(() => new THREE.BoxGeometry(width, 0.2, 2), [width]);
+  const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+  
   return (
-    <mesh position={[width / 2 - 2, -0.1, 0]}>
-      <primitive object={geometry} />
-      <meshBasicMaterial color="#1e293b" opacity={0.3} transparent />
-    </mesh>
+    <group position={[width / 2 - 2, -0.1, 0]}>
+      <mesh>
+        <primitive object={geometry} />
+        <meshBasicMaterial 
+          color={isDragging ? "#1e3a5f" : "#1e293b"} 
+          opacity={0.3} 
+          transparent 
+        />
+      </mesh>
+      <lineSegments geometry={edges}>
+        <lineBasicMaterial 
+          color={isDragging ? "#f97316" : "#64748b"} 
+          linewidth={2} 
+        />
+      </lineSegments>
+    </group>
   );
 };
 
@@ -250,7 +420,6 @@ const OperationsPanel = ({ position, onEnqueue, onDequeue, addButtonRef, selecte
   useEffect(() => {
     if (selectedButton) {
       setActiveButton(selectedButton);
-      // clear active after a short while so visual feedback resets
       const t = setTimeout(() => setActiveButton(null), 300);
       return () => clearTimeout(t);
     }
