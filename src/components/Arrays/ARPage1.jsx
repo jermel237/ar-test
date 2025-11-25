@@ -2,21 +2,14 @@ import React, { useMemo, useState, useRef, useEffect, forwardRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
-import { setupXRInput } from "../../utils/xrInput";
 
 const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   const [showPanel, setShowPanel] = useState(false);
   const [page, setPage] = useState(0);
   const [selectedBox, setSelectedBox] = useState(null);
-  
-  // Structure position (whole array moves together)
-  const [structurePos, setStructurePos] = useState([0, 0, -8]);
-  const [isDragging, setIsDragging] = useState(false);
-  
   const boxRefs = useRef([]);
-  const structureRef = useRef();
 
+  // --- Helper to collect box refs ---
   const addBoxRef = (r) => {
     if (r && !boxRefs.current.includes(r)) boxRefs.current.push(r);
   };
@@ -27,11 +20,9 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   }, [data, spacing]);
 
   const handleClick = (i) => {
-    if (!isDragging) {
-      setSelectedBox(i);
-      setShowPanel(true);
-      setPage(0);
-    }
+    setSelectedBox(i);
+    setShowPanel(true);
+    setPage(0);
   };
 
   const handleNextClick = () => {
@@ -39,21 +30,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
     else setShowPanel(false);
   };
 
-  // Drag whole structure
-  const onDragStart = () => {
-    setIsDragging(true);
-    setShowPanel(false);
-    setSelectedBox(null);
-  };
-
-  const onDragMove = (newPos) => {
-    setStructurePos(newPos);
-  };
-
-  const onDragEnd = () => {
-    setIsDragging(false);
-  };
-
+  // === Automatically start AR session ===
   const startAR = (gl) => {
     if (navigator.xr) {
       navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
@@ -79,15 +56,13 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
         camera={{ position: [0, 4, 25], fov: 50 }}
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
-          startAR(gl);
+          startAR(gl); // <-- Start AR automatically here
         }}
       >
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Whole structure group - this moves when dragging */}
-        <group position={structurePos} ref={structureRef}>
-          
+        <group position={[0, 0, -8]}>
           <FadeInText
             show={true}
             text={"Array Data Structure"}
@@ -96,18 +71,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
             color="white"
           />
 
-          {/* Dragging indicator */}
-          {isDragging && (
-            <FadeInText
-              show={true}
-              text={"✋ Moving Structure..."}
-              position={[0, 4, 0]}
-              fontSize={0.5}
-              color="#f97316"
-            />
-          )}
-
-          <ArrayBackground data={data} spacing={spacing} isDragging={isDragging} />
+          <ArrayBackground data={data} spacing={spacing} />
 
           {data.map((value, i) => (
             <Box
@@ -121,7 +85,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
             />
           ))}
 
-          {showPanel && selectedBox !== null && !isDragging && (
+          {showPanel && selectedBox !== null && (
             <DefinitionPanel
               page={page}
               data={data}
@@ -134,84 +98,62 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
 
         <ARInteractionManager
           boxRefs={boxRefs}
-          structureRef={structureRef}
           setSelectedBox={setSelectedBox}
-          isDragging={isDragging}
-          onDragStart={onDragStart}
-          onDragMove={onDragMove}
-          onDragEnd={onDragEnd}
-          structurePos={structurePos}
         />
-        <OrbitControls makeDefault enabled={!isDragging} />
+        <OrbitControls makeDefault />
       </Canvas>
     </div>
   );
 };
 
 // --- AR Interaction Manager ---
-const ARInteractionManager = ({
-  boxRefs,
-  structureRef,
-  setSelectedBox,
-  isDragging,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
-  structurePos
-}) => {
+const ARInteractionManager = ({ boxRefs, setSelectedBox }) => {
   const { gl } = useThree();
-  const longPressTimer = useRef(null);
-  const touchedBox = useRef(null);
-  const isDraggingRef = useRef(false);
 
   useEffect(() => {
-    isDraggingRef.current = isDragging;
-  }, [isDragging]);
+    const onSessionStart = () => {
+      const session = gl.xr.getSession();
+      if (!session) return;
 
-  useEffect(() => {
-    if (isIOS()) return;
+      const onSelect = () => {
+        const xrCamera = gl.xr.getCamera();
+        const raycaster = new THREE.Raycaster();
+        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
+        const dir = new THREE.Vector3(0, 0, -1)
+          .applyQuaternion(cam.quaternion)
+          .normalize();
+        const origin = cam.getWorldPosition(new THREE.Vector3());
+        raycaster.set(origin, dir);
 
-    const cleanup = setupXRInput(gl, {
-      getCandidates: () => {
-        const all = [];
-        boxRefs.current.forEach((g) => {
-          if (g && g.children) {
-            g.children.forEach((c) => all.push(c));
+        const candidates = (boxRefs.current || [])
+          .map((group) => (group ? group.children : []))
+          .flat();
+
+        const intersects = raycaster.intersectObjects(candidates, true);
+        if (intersects.length > 0) {
+          let hit = intersects[0].object;
+          while (hit && hit.userData?.boxIndex === undefined && hit.parent) {
+            hit = hit.parent;
           }
-        });
-        return all;
-      },
-      onSelect: (hit) => {
-        // short tap/select -> choose box
-        if (hit && hit.index !== undefined && hit.index >= 0) setSelectedBox(hit.index);
-      },
-      onSelectStart: () => {
-        // used for long-press/drag start if needed by app logic
-      },
-      onDragMove: (hit) => {
-        // while dragging, update position using ray hit point
-        if (isDraggingRef.current && hit && hit.point) {
-          onDragMove([hit.point.x, hit.point.y, hit.point.z]);
+          const idx = hit?.userData?.boxIndex;
+          if (idx !== undefined) setSelectedBox(idx);
         }
-      },
-      onSelectEnd: () => {
-        // drop structure
-        if (isDraggingRef.current) onDragEnd();
-      },
-    });
+      };
 
-    return () => {
-      try {
-        if (typeof cleanup === "function") cleanup();
-      } catch (e) {}
+      session.addEventListener("select", onSelect);
+      const onEnd = () => session.removeEventListener("select", onSelect);
+      session.addEventListener("end", onEnd);
     };
-  }, [gl, boxRefs, structureRef, setSelectedBox, onDragStart, onDragMove, onDragEnd, structurePos]);
+
+    gl.xr.addEventListener("sessionstart", onSessionStart);
+    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
+  }, [gl, boxRefs, setSelectedBox]);
 
   return null;
 };
 
 // === Background ===
-const ArrayBackground = ({ data, spacing, isDragging }) => {
+const ArrayBackground = ({ data, spacing }) => {
   const width = Math.max(6, (data.length - 1) * spacing + 3);
   const height = 2.4;
   const boxGeo = useMemo(
@@ -223,14 +165,10 @@ const ArrayBackground = ({ data, spacing, isDragging }) => {
   return (
     <group position={[0, 0.9, -1]}>
       <mesh geometry={boxGeo}>
-        <meshStandardMaterial 
-          color={isDragging ? "#1e3a5f" : "#0f172a"} 
-          emissive={isDragging ? "#f97316" : "#000000"}
-          emissiveIntensity={isDragging ? 0.2 : 0}
-        />
+        <meshStandardMaterial color="#0f172a" />
       </mesh>
       <lineSegments geometry={edgesGeo}>
-        <lineBasicMaterial color={isDragging ? "#f97316" : "#ffffff"} />
+        <lineBasicMaterial />
       </lineSegments>
     </group>
   );

@@ -4,7 +4,6 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import useSound from "use-sound";
 import dingSfx from "/sounds/ding.mp3";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 /**
  * ARPage5.jsx (Closer to Camera at Z = -7)
@@ -83,8 +82,19 @@ const ARPage5 = ({ spacing = 2.2 }) => {
     });
   }, [array, spacing, removedIndexes]);
 
-  const startAR = async (gl) => {
-    await initARSession(gl);
+  const startAR = (gl) => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+        if (supported) {
+          navigator.xr
+            .requestSession("immersive-ar", {
+              requiredFeatures: ["hit-test", "local-floor"],
+            })
+            .then((session) => gl.xr.setSession(session))
+            .catch((err) => console.error("AR session failed:", err));
+        }
+      });
+    }
   };
 
   return (
@@ -146,11 +156,6 @@ const ARInteractionManager = ({ boxRefs, handleSelectRef }) => {
   const { gl } = useThree();
 
   useEffect(() => {
-    // Skip AR session setup on iOS
-    if (isIOS()) {
-      return;
-    }
-
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;

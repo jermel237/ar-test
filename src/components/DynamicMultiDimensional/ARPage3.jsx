@@ -2,7 +2,6 @@ import React, { useRef, useState, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 const ARVisualPage3 = ({
   rows = 3,
@@ -86,7 +85,16 @@ const ARVisualPage3 = ({
         shadows
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
-          initARSession(gl);
+          if (navigator.xr) {
+            navigator.xr
+              .requestSession("immersive-ar", {
+                requiredFeatures: ["hit-test", "local-floor"],
+              })
+              .then((session) => {
+                gl.xr.setSession(session);
+              })
+              .catch((err) => console.error("❌ AR Session failed:", err));
+          }
         }}
       >
         <ambientLight intensity={0.4} />

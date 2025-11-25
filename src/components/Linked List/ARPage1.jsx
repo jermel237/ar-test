@@ -2,8 +2,6 @@ import React, { useMemo, useState, useRef, useEffect, forwardRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
-import { setupXRInput } from "../../utils/xrInput";
 
 const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
   const [selectedNode, setSelectedNode] = useState(null);
@@ -35,12 +33,24 @@ const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
     ].join("\n");
   };
 
-  // === Check device platform ===
-  const isIOSDevice = isIOS();
-
   // === Auto-start AR session ===
-  const startAR = async (gl) => {
-    await initARSession(gl);
+  const startAR = (gl) => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+        if (supported) {
+          navigator.xr
+            .requestSession("immersive-ar", {
+              requiredFeatures: ["hit-test", "local-floor"],
+            })
+            .then((session) => {
+              gl.xr.setSession(session);
+            })
+            .catch((err) => console.error("AR session failed:", err));
+        } else {
+          console.warn("AR not supported on this device.");
+        }
+      });
+    }
   };
 
   return (
@@ -103,24 +113,45 @@ const ARInteractionManager = ({ nodeRefs, setSelectedNode }) => {
   const { gl } = useThree();
 
   useEffect(() => {
-    // Skip AR session setup on iOS
-    if (isIOS()) {
-      return;
-    }
+    const onSessionStart = () => {
+      const session = gl.xr.getSession();
+      if (!session) return;
 
-    const cleanup = setupXRInput(gl, {
-      getCandidates: () => (nodeRefs.current || []).map((g) => (g ? g.children : [])).flat(),
-      onSelect: (hit) => {
-        const idx = hit?.index;
-        if (idx !== undefined) setSelectedNode((prev) => (prev === idx ? null : idx));
-      },
-    });
+      const onSelect = () => {
+        const xrCamera = gl.xr.getCamera();
+        const raycaster = new THREE.Raycaster();
+        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
 
-    return () => {
-      try {
-        if (typeof cleanup === "function") cleanup();
-      } catch (e) {}
+        const dir = new THREE.Vector3(0, 0, -1)
+          .applyQuaternion(cam.quaternion)
+          .normalize();
+        const origin = cam.getWorldPosition(new THREE.Vector3());
+        raycaster.set(origin, dir);
+
+        const candidates = (nodeRefs.current || [])
+          .map((group) => (group ? group.children : []))
+          .flat();
+
+        const intersects = raycaster.intersectObjects(candidates, true);
+        if (intersects.length > 0) {
+          let hit = intersects[0].object;
+          while (hit && hit.userData?.nodeIndex === undefined && hit.parent) {
+            hit = hit.parent;
+          }
+          const idx = hit?.userData?.nodeIndex;
+          if (idx !== undefined) {
+            setSelectedNode((prev) => (prev === idx ? null : idx));
+          }
+        }
+      };
+
+      session.addEventListener("select", onSelect);
+      const onEnd = () => session.removeEventListener("select", onSelect);
+      session.addEventListener("end", onEnd);
     };
+
+    gl.xr.addEventListener("sessionstart", onSessionStart);
+    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
   }, [gl, nodeRefs, setSelectedNode]);
 
   return null;

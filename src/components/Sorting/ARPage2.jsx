@@ -4,7 +4,6 @@ import React, { useState, useMemo, useEffect, useRef, forwardRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Text, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 const ARPage2 = ({ data = [35, 10, 25, 5, 15], spacing = 2 }) => {
   const [array, setArray] = useState(data);
@@ -84,8 +83,21 @@ const ARPage2 = ({ data = [35, 10, 25, 5, 15], spacing = 2 }) => {
   };
 
   // === Auto AR Start ===
-  const startAR = async (gl) => {
-    await initARSession(gl);
+  const startAR = (gl) => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+        if (supported) {
+          navigator.xr
+            .requestSession("immersive-ar", {
+              requiredFeatures: ["hit-test", "local-floor"],
+            })
+            .then((session) => {
+              gl.xr.setSession(session);
+            })
+            .catch((err) => console.error("AR session failed:", err));
+        }
+      });
+    }
   };
 
   return (
@@ -217,11 +229,6 @@ const ARInteractionManager = ({ boxGroupRefs, onToggleSort }) => {
   const { gl } = useThree();
 
   useEffect(() => {
-    // Skip AR session setup on iOS
-    if (isIOS()) {
-      return;
-    }
-
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;

@@ -3,7 +3,6 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 const ARPage3 = () => {
   const [queue, setQueue] = useState([10, 20, 30]);
@@ -37,8 +36,20 @@ const ARPage3 = () => {
   };
 
   // === AR Session start ===
-  const startAR = async (gl) => {
-    await initARSession(gl);
+  const startAR = (gl) => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+        if (supported) {
+          navigator.xr
+            .requestSession("immersive-ar", { requiredFeatures: ["hit-test", "local-floor"] })
+            .then((session) => gl.xr.setSession(session))
+            .catch((err) => console.error("AR session failed:", err));
+        } else {
+          // not required, just informative
+          console.warn("immersive-ar not supported");
+        }
+      });
+    }
   };
 
   // collect button group refs
@@ -120,7 +131,6 @@ const ARInteractionManager = ({ buttonRefs, setSelectedButton, handleEnqueue, ha
   const { gl } = useThree();
 
   useEffect(() => {
-    if (isIOS()) { return; }
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;

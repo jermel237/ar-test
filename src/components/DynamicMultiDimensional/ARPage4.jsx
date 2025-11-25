@@ -1,7 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 // ---------- Reticle for AR placement ----------
 function Reticle({ children }) {

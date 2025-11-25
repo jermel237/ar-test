@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
-import { initARSession, isIOS } from "../../utils/arCompatibility";
 
 const ARPage5 = ({
   data = [10, 20, 30, 40, 50],
