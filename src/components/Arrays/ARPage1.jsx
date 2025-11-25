@@ -7,6 +7,8 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   const [showPanel, setShowPanel] = useState(false);
   const [page, setPage] = useState(0);
   const [selectedBox, setSelectedBox] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [draggedBox, setDraggedBox] = useState(null);
   const boxRefs = useRef([]);
   const [boxPositions, setBoxPositions] = useState(null);
 
@@ -30,9 +32,11 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   }, [initialPositions, boxPositions]);
 
   const handleClick = (i) => {
-    setSelectedBox(i);
-    setShowPanel(true);
-    setPage(0);
+    if (!isDragging) {
+      setSelectedBox(i);
+      setShowPanel(true);
+      setPage(0);
+    }
   };
 
   const handleNextClick = () => {
@@ -73,7 +77,69 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   const currentPositions = boxPositions || initialPositions;
 
   return (
-    <div className="w-full h-[300px]">
+    <div className="w-full h-[300px] relative">
+      {/* Crosshair UI */}
+      <div
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          zIndex: 100,
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            width: isDragging ? "30px" : "20px",
+            height: isDragging ? "30px" : "20px",
+            border: isDragging ? "3px solid #ff6b6b" : "2px solid white",
+            borderRadius: "50%",
+            backgroundColor: isDragging ? "rgba(255,107,107,0.3)" : "transparent",
+            transition: "all 0.2s ease",
+          }}
+        />
+      </div>
+
+      {/* Drag instruction */}
+      {isDragging && (
+        <div
+          style={{
+            position: "absolute",
+            top: "60%",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 100,
+            color: "#ff6b6b",
+            fontSize: "14px",
+            fontWeight: "bold",
+            textShadow: "0 0 5px black",
+            pointerEvents: "none",
+          }}
+        >
+          Move device to drag • Tap to release
+        </div>
+      )}
+
+      {/* Hold instruction */}
+      {selectedBox !== null && !isDragging && !showPanel && (
+        <div
+          style={{
+            position: "absolute",
+            top: "60%",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 100,
+            color: "#fde68a",
+            fontSize: "12px",
+            textShadow: "0 0 5px black",
+            pointerEvents: "none",
+          }}
+        >
+          Long press to drag
+        </div>
+      )}
+
       <Canvas
         camera={{ position: [0, 4, 25], fov: 50 }}
         onCreated={({ gl }) => {
@@ -96,19 +162,19 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
           <ArrayBackground data={data} spacing={spacing} />
 
           {data.map((value, i) => (
-            <DraggableBox
+            <Box
               key={i}
               index={i}
               value={value}
               position={currentPositions[i]}
               selected={selectedBox === i}
+              isDragging={draggedBox === i}
               onClick={() => handleClick(i)}
-              onPositionChange={(newPos) => updateBoxPosition(i, newPos)}
               ref={(r) => addBoxRef(i, r)}
             />
           ))}
 
-          {showPanel && selectedBox !== null && (
+          {showPanel && selectedBox !== null && !isDragging && (
             <DefinitionPanel
               page={page}
               data={data}
@@ -119,271 +185,182 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
           )}
         </group>
 
-        <ARDragController
+        {/* Center Crosshair Interaction System */}
+        <CenterCrosshairDragSystem
           boxRefs={boxRefs}
+          selectedBox={selectedBox}
           setSelectedBox={setSelectedBox}
+          isDragging={isDragging}
+          setIsDragging={setIsDragging}
+          draggedBox={draggedBox}
+          setDraggedBox={setDraggedBox}
           updateBoxPosition={updateBoxPosition}
+          setShowPanel={setShowPanel}
         />
-        <OrbitControls makeDefault />
+
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
-// --- AR Drag Controller ---
-const ARDragController = ({ boxRefs, setSelectedBox, updateBoxPosition }) => {
-  const { gl, camera } = useThree();
-  const dragging = useRef(null);
-  const dragOffset = useRef(new THREE.Vector3());
+// --- Center Crosshair Drag System ---
+const CenterCrosshairDragSystem = ({
+  boxRefs,
+  selectedBox,
+  setSelectedBox,
+  isDragging,
+  setIsDragging,
+  draggedBox,
+  setDraggedBox,
+  updateBoxPosition,
+  setShowPanel,
+}) => {
+  const { camera, gl, scene } = useThree();
   const raycaster = useRef(new THREE.Raycaster());
-  const tempMatrix = useRef(new THREE.Matrix4());
-  const controllers = useRef([]);
+  const holdTimer = useRef(null);
+  const holdStartTime = useRef(0);
+  const isHolding = useRef(false);
+  const dragDistance = useRef(3); // Distance from camera when dragging
 
+  // Raycast from center of screen
+  const raycastFromCenter = () => {
+    // Center of screen is (0, 0) in normalized device coordinates
+    raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+    // Get all box meshes
+    const meshes = [];
+    boxRefs.current.forEach((group, index) => {
+      if (group) {
+        group.traverse((child) => {
+          if (child.isMesh) {
+            child.userData.boxIndex = index;
+            meshes.push(child);
+          }
+        });
+      }
+    });
+
+    const intersects = raycaster.current.intersectObjects(meshes, false);
+
+    if (intersects.length > 0) {
+      let hit = intersects[0].object;
+      while (hit && hit.userData?.boxIndex === undefined && hit.parent) {
+        hit = hit.parent;
+      }
+      return {
+        index: hit?.userData?.boxIndex,
+        point: intersects[0].point,
+        distance: intersects[0].distance,
+      };
+    }
+    return null;
+  };
+
+  // Handle touch/click start (long press detection)
+  const handlePointerDown = (e) => {
+    if (isDragging) {
+      // If already dragging, release on tap
+      releaseDrag();
+      return;
+    }
+
+    const hit = raycastFromCenter();
+    if (hit && hit.index !== undefined) {
+      holdStartTime.current = Date.now();
+      isHolding.current = true;
+      dragDistance.current = hit.distance;
+
+      // Start hold timer for drag initiation
+      holdTimer.current = setTimeout(() => {
+        if (isHolding.current) {
+          // Long press detected - start dragging
+          setDraggedBox(hit.index);
+          setIsDragging(true);
+          setSelectedBox(hit.index);
+          setShowPanel(false);
+        }
+      }, 500); // 500ms hold time to start drag
+    }
+  };
+
+  // Handle touch/click end
+  const handlePointerUp = () => {
+    const holdDuration = Date.now() - holdStartTime.current;
+    isHolding.current = false;
+
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+
+    // If it was a quick tap (not a long press) and not dragging
+    if (holdDuration < 500 && !isDragging) {
+      const hit = raycastFromCenter();
+      if (hit && hit.index !== undefined) {
+        setSelectedBox(hit.index);
+        setShowPanel(true);
+      }
+    }
+  };
+
+  // Release drag
+  const releaseDrag = () => {
+    if (draggedBox !== null) {
+      const group = boxRefs.current[draggedBox];
+      if (group) {
+        const localPos = group.position;
+        updateBoxPosition(draggedBox, [localPos.x, localPos.y, localPos.z]);
+      }
+    }
+    setIsDragging(false);
+    setDraggedBox(null);
+  };
+
+  // Setup event listeners
   useEffect(() => {
-    // Setup XR controllers
-    const controller0 = gl.xr.getController(0);
-    const controller1 = gl.xr.getController(1);
-    
-    controllers.current = [controller0, controller1];
+    const canvas = gl.domElement;
 
-    const onSelectStart = (event) => {
-      const controller = event.target;
-      
-      // Update raycaster from controller
-      tempMatrix.current.identity().extractRotation(controller.matrixWorld);
-      raycaster.current.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-      raycaster.current.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix.current);
-
-      // Get all box meshes
-      const meshes = [];
-      boxRefs.current.forEach((group, index) => {
-        if (group) {
-          group.traverse((child) => {
-            if (child.isMesh) {
-              child.userData.boxIndex = index;
-              meshes.push(child);
-            }
-          });
-        }
-      });
-
-      const intersects = raycaster.current.intersectObjects(meshes, false);
-      
-      if (intersects.length > 0) {
-        const hit = intersects[0];
-        const boxIndex = hit.object.userData.boxIndex;
-        
-        if (boxIndex !== undefined) {
-          dragging.current = {
-            index: boxIndex,
-            controller: controller,
-            object: boxRefs.current[boxIndex],
-          };
-          
-          // Calculate offset
-          const boxWorldPos = new THREE.Vector3();
-          boxRefs.current[boxIndex].getWorldPosition(boxWorldPos);
-          dragOffset.current.copy(boxWorldPos).sub(hit.point);
-          
-          setSelectedBox(boxIndex);
-          
-          // Add visual feedback
-          controller.userData.dragging = true;
-        }
-      }
-    };
-
-    const onSelectEnd = (event) => {
-      const controller = event.target;
-      
-      if (dragging.current && dragging.current.controller === controller) {
-        // Save final position
-        const group = dragging.current.object;
-        if (group && group.parent) {
-          const localPos = group.position.clone();
-          updateBoxPosition(dragging.current.index, [localPos.x, localPos.y, localPos.z]);
-        }
-        
-        controller.userData.dragging = false;
-        dragging.current = null;
-      }
-    };
-
-    controller0.addEventListener("selectstart", onSelectStart);
-    controller0.addEventListener("selectend", onSelectEnd);
-    controller1.addEventListener("selectstart", onSelectStart);
-    controller1.addEventListener("selectend", onSelectEnd);
-
-    // Add controllers to scene
-    const scene = gl.xr.getSession() ? gl.xr.getReferenceSpace() : null;
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointercancel", handlePointerUp);
 
     return () => {
-      controller0.removeEventListener("selectstart", onSelectStart);
-      controller0.removeEventListener("selectend", onSelectEnd);
-      controller1.removeEventListener("selectstart", onSelectStart);
-      controller1.removeEventListener("selectend", onSelectEnd);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointercancel", handlePointerUp);
+      if (holdTimer.current) {
+        clearTimeout(holdTimer.current);
+      }
     };
-  }, [gl, boxRefs, setSelectedBox, updateBoxPosition]);
+  }, [gl, isDragging, draggedBox]);
 
-  // Update dragged object position every frame
+  // Update dragged box position every frame (follows camera center)
   useFrame(() => {
-    if (!dragging.current) return;
+    if (!isDragging || draggedBox === null) return;
 
-    const { controller, object, index } = dragging.current;
-    
-    if (!controller || !object) return;
+    const group = boxRefs.current[draggedBox];
+    if (!group) return;
 
-    // Get controller position and direction
-    tempMatrix.current.identity().extractRotation(controller.matrixWorld);
-    const controllerPos = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-    const direction = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix.current);
-    
-    // Calculate new position (2 units in front of controller)
-    const distance = 2;
-    const newWorldPos = controllerPos.clone().add(direction.multiplyScalar(distance));
-    newWorldPos.add(dragOffset.current);
-    
-    // Convert to local position
-    if (object.parent) {
-      const newLocalPos = object.parent.worldToLocal(newWorldPos);
-      object.position.copy(newLocalPos);
+    // Get the point in front of camera center
+    raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const direction = raycaster.current.ray.direction.clone();
+    const origin = raycaster.current.ray.origin.clone();
+
+    // Calculate new world position
+    const newWorldPos = origin.add(direction.multiplyScalar(dragDistance.current));
+
+    // Convert to local position (relative to parent group)
+    if (group.parent) {
+      const newLocalPos = group.parent.worldToLocal(newWorldPos.clone());
+      
+      // Smooth movement
+      group.position.lerp(newLocalPos, 0.3);
     }
   });
 
   return null;
 };
-
-// === Draggable Box Component ===
-const DraggableBox = forwardRef(({ index, value, position, selected, onClick, onPositionChange }, ref) => {
-  const size = [1.6, 1.2, 1];
-  const color = selected ? "#facc15" : index % 2 === 0 ? "#60a5fa" : "#34d399";
-  const groupRef = useRef();
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef(null);
-
-  useEffect(() => {
-    if (groupRef.current) {
-      groupRef.current.userData = { boxIndex: index };
-    }
-  }, [index]);
-
-  // Mouse/Touch drag for non-AR mode
-  const handlePointerDown = (e) => {
-    e.stopPropagation();
-    setIsDragging(true);
-    dragStart.current = {
-      x: e.point.x,
-      y: e.point.y,
-      z: e.point.z,
-      posX: position[0],
-      posY: position[1],
-      posZ: position[2],
-    };
-    e.target.setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e) => {
-    if (!isDragging || !dragStart.current) return;
-    e.stopPropagation();
-    
-    const deltaX = e.point.x - dragStart.current.x;
-    const deltaY = e.point.y - dragStart.current.y;
-    
-    const newX = dragStart.current.posX + deltaX;
-    const newY = dragStart.current.posY + deltaY;
-    
-    if (groupRef.current) {
-      groupRef.current.position.x = newX;
-      groupRef.current.position.y = newY;
-    }
-  };
-
-  const handlePointerUp = (e) => {
-    if (isDragging && groupRef.current) {
-      e.stopPropagation();
-      const newPos = [
-        groupRef.current.position.x,
-        groupRef.current.position.y,
-        groupRef.current.position.z,
-      ];
-      onPositionChange(newPos);
-      
-      // Only trigger click if we didn't drag much
-      const totalDrag = dragStart.current 
-        ? Math.abs(groupRef.current.position.x - dragStart.current.posX) + 
-          Math.abs(groupRef.current.position.y - dragStart.current.posY)
-        : 0;
-      
-      if (totalDrag < 0.1) {
-        onClick();
-      }
-    }
-    setIsDragging(false);
-    dragStart.current = null;
-  };
-
-  return (
-    <group
-      position={position}
-      ref={(g) => {
-        groupRef.current = g;
-        if (typeof ref === "function") ref(g);
-        else if (ref) ref.current = g;
-      }}
-    >
-      <mesh
-        castShadow
-        receiveShadow
-        position={[0, size[1] / 2, 0]}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-      >
-        <boxGeometry args={size} />
-        <meshStandardMaterial
-          color={isDragging ? "#ff6b6b" : color}
-          emissive={selected ? "#fbbf24" : isDragging ? "#ff0000" : "#000000"}
-          emissiveIntensity={selected ? 0.4 : isDragging ? 0.3 : 0}
-        />
-      </mesh>
-
-      <FadeInText
-        show={true}
-        text={String(value)}
-        position={[0, size[1] / 2 + 0.15, size[2] / 2 + 0.01]}
-        fontSize={0.4}
-        color="white"
-      />
-
-      <mesh position={[0, -0.3, size[2] / 2 + 0.01]}>
-        <planeGeometry args={[0.9, 0.4]} />
-        <meshBasicMaterial transparent opacity={0} />
-        <Text
-          position={[0, 0, 0.01]}
-          fontSize={0.3}
-          color="yellow"
-          anchorX="center"
-          anchorY="middle"
-        >
-          [{index}]
-        </Text>
-      </mesh>
-
-      {selected && (
-        <Text
-          position={[0, size[1] + 0.8, 0]}
-          fontSize={0.3}
-          color="#fde68a"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {isDragging ? "Dragging..." : `Value ${value} at index ${index}`}
-        </Text>
-      )}
-    </group>
-  );
-});
 
 // === Background ===
 const ArrayBackground = ({ data, spacing }) => {
@@ -443,6 +420,94 @@ const FadeInText = ({ show, text, position, fontSize, color }) => {
     </Text>
   );
 };
+
+// === Box ===
+const Box = forwardRef(({ index, value, position, selected, isDragging, onClick }, ref) => {
+  const size = [1.6, 1.2, 1];
+  
+  // Color changes based on state
+  let color = index % 2 === 0 ? "#60a5fa" : "#34d399";
+  if (selected) color = "#facc15";
+  if (isDragging) color = "#ff6b6b";
+
+  const groupRef = useRef();
+
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.userData = { boxIndex: index };
+    }
+  }, [index]);
+
+  return (
+    <group
+      position={position}
+      ref={(g) => {
+        groupRef.current = g;
+        if (typeof ref === "function") ref(g);
+        else if (ref) ref.current = g;
+      }}
+    >
+      {/* Main box mesh */}
+      <mesh
+        castShadow
+        receiveShadow
+        position={[0, size[1] / 2, 0]}
+      >
+        <boxGeometry args={size} />
+        <meshStandardMaterial
+          color={color}
+          emissive={isDragging ? "#ff0000" : selected ? "#fbbf24" : "#000000"}
+          emissiveIntensity={isDragging ? 0.5 : selected ? 0.4 : 0}
+        />
+      </mesh>
+
+      {/* Value text */}
+      <FadeInText
+        show={true}
+        text={String(value)}
+        position={[0, size[1] / 2 + 0.15, size[2] / 2 + 0.01]}
+        fontSize={0.4}
+        color="white"
+      />
+
+      {/* Index label */}
+      <mesh position={[0, -0.3, size[2] / 2 + 0.01]}>
+        <planeGeometry args={[0.9, 0.4]} />
+        <meshBasicMaterial transparent opacity={0} />
+        <Text
+          position={[0, 0, 0.01]}
+          fontSize={0.3}
+          color="yellow"
+          anchorX="center"
+          anchorY="middle"
+        >
+          [{index}]
+        </Text>
+      </mesh>
+
+      {/* Status text above box */}
+      {(selected || isDragging) && (
+        <Text
+          position={[0, size[1] + 0.8, 0]}
+          fontSize={0.3}
+          color={isDragging ? "#ff6b6b" : "#fde68a"}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {isDragging ? "🎯 Dragging..." : `Value ${value} at index ${index}`}
+        </Text>
+      )}
+
+      {/* Dragging indicator ring */}
+      {isDragging && (
+        <mesh position={[0, size[1] / 2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[1.2, 1.4, 32]} />
+          <meshBasicMaterial color="#ff6b6b" transparent opacity={0.6} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+    </group>
+  );
+});
 
 // === Definition Panel ===
 const DefinitionPanel = ({ page, data, index, position, onNextClick }) => {
