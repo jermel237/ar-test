@@ -83,9 +83,8 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Whole structure group - this moves when dragging */}
+        {/* Whole structure group - moves together when dragging */}
         <group position={structurePos} ref={structureRef}>
-          
           <FadeInText
             show={true}
             text={"Array Data Structure"}
@@ -99,13 +98,13 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
             <FadeInText
               show={true}
               text={"✋ Moving Structure..."}
-              position={[0, 4, 0]}
-              fontSize={0.5}
+              position={[0, 2.3, 0]}
+              fontSize={0.4}
               color="#f97316"
             />
           )}
 
-          <ArrayBackground data={data} spacing={spacing} isDragging={isDragging} />
+          {/* NO ArrayBackground - REMOVED */}
 
           {data.map((value, i) => (
             <Box
@@ -138,7 +137,6 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
-          structurePos={structurePos}
         />
         <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
@@ -154,8 +152,7 @@ const ARInteractionManager = ({
   isDragging,
   onDragStart,
   onDragMove,
-  onDragEnd,
-  structurePos
+  onDragEnd
 }) => {
   const { gl } = useThree();
   const longPressTimer = useRef(null);
@@ -213,7 +210,7 @@ const ARInteractionManager = ({
       const getPointPosition = () => {
         const { origin, dir } = getCameraRay();
         
-        // Project ray to a distance (e.g., 8 units in front)
+        // Project ray to a distance (8 units in front)
         const distance = 8;
         const x = origin.x + dir.x * distance;
         const y = origin.y + dir.y * distance;
@@ -288,35 +285,9 @@ const ARInteractionManager = ({
         clearTimeout(longPressTimer.current);
       }
     };
-  }, [gl, boxRefs, structureRef, setSelectedBox, onDragStart, onDragMove, onDragEnd, structurePos]);
+  }, [gl, boxRefs, structureRef, setSelectedBox, onDragStart, onDragMove, onDragEnd]);
 
   return null;
-};
-
-// === Background ===
-const ArrayBackground = ({ data, spacing, isDragging }) => {
-  const width = Math.max(6, (data.length - 1) * spacing + 3);
-  const height = 2.4;
-  const boxGeo = useMemo(
-    () => new THREE.BoxGeometry(width, height, 0.06),
-    [width, height]
-  );
-  const edgesGeo = useMemo(() => new THREE.EdgesGeometry(boxGeo), [boxGeo]);
-
-  return (
-    <group position={[0, 0.9, -1]}>
-      <mesh geometry={boxGeo}>
-        <meshStandardMaterial 
-          color={isDragging ? "#1e3a5f" : "#0f172a"} 
-          emissive={isDragging ? "#f97316" : "#000000"}
-          emissiveIntensity={isDragging ? 0.2 : 0}
-        />
-      </mesh>
-      <lineSegments geometry={edgesGeo}>
-        <lineBasicMaterial color={isDragging ? "#f97316" : "#ffffff"} />
-      </lineSegments>
-    </group>
-  );
 };
 
 // === Fade-in Text ===
