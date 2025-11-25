@@ -1,10 +1,14 @@
 import React, { useMemo, useState, useRef, useEffect, forwardRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import { Text, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
 const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
   const [selectedNode, setSelectedNode] = useState(null);
+
+  // Structure position (whole structure moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -8]);
+  const [isDragging, setIsDragging] = useState(false);
 
   // === Compute node positions ===
   const positions = useMemo(() => {
@@ -14,8 +18,24 @@ const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
 
   // === Node references for AR raycasting ===
   const nodeRefs = useRef([]);
+  const structureRef = useRef();
+  
   const addNodeRef = (r) => {
     if (r && !nodeRefs.current.includes(r)) nodeRefs.current.push(r);
+  };
+
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setSelectedNode(null);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
   };
 
   // === Generate pseudo code when node is tapped ===
@@ -66,8 +86,8 @@ const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        {/* Scene */}
-        <group position={[0, 0, -8]}>
+        {/* Whole structure group - moves together when dragging */}
+        <group position={structurePos} ref={structureRef}>
           <FadeText
             text="Linked List Introduction"
             position={[0, 4, -2]}
@@ -75,10 +95,10 @@ const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
             color="#facc15"
           />
           <FadeText
-            text="Tap a node to view its value and pseudo code"
+            text={isDragging ? "✋ Moving Structure..." : "Tap a node to view its value and pseudo code"}
             position={[0, 3.2, -2]}
             fontSize={0.35}
-            color="white"
+            color={isDragging ? "#f97316" : "white"}
           />
 
           {nodes.map((value, i) => (
@@ -89,12 +109,16 @@ const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
               position={positions[i]}
               selected={selectedNode === i}
               isLast={i === nodes.length - 1}
-              onClick={() => setSelectedNode((prev) => (prev === i ? null : i))}
+              onClick={() => {
+                if (!isDragging) {
+                  setSelectedNode((prev) => (prev === i ? null : i));
+                }
+              }}
               ref={(r) => addNodeRef(r)}
             />
           ))}
 
-          {selectedNode !== null && (
+          {selectedNode !== null && !isDragging && (
             <CodePanel
               code={generateCode(selectedNode, nodes[selectedNode])}
               position={[positions[positions.length - 1][0] + 8, 1, 0]}
@@ -102,30 +126,58 @@ const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
           )}
         </group>
 
-        <ARInteractionManager nodeRefs={nodeRefs} setSelectedNode={setSelectedNode} />
+        <ARInteractionManager 
+          nodeRefs={nodeRefs} 
+          structureRef={structureRef}
+          setSelectedNode={setSelectedNode}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+        />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
 // === AR Interaction Manager ===
-const ARInteractionManager = ({ nodeRefs, setSelectedNode }) => {
+const ARInteractionManager = ({ 
+  nodeRefs, 
+  structureRef,
+  setSelectedNode,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedNode = useRef(null);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check if pointing at any node
+      const getHitNode = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
         const candidates = (nodeRefs.current || [])
@@ -140,19 +192,93 @@ const ARInteractionManager = ({ nodeRefs, setSelectedNode }) => {
           }
           const idx = hit?.userData?.nodeIndex;
           if (idx !== undefined) {
-            setSelectedNode((prev) => (prev === idx ? null : idx));
+            return idx;
           }
+          return -1; // Hit structure but not specific node
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (8 units in front)
+        const distance = 8;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitNode = getHitNode();
+        touchedNode.current = hitNode;
+
+        // If touching any part of structure, start long press for drag
+        if (hitNode !== null) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedNode.current !== null && touchedNode.current >= 0) {
+          // Short tap on node - select it
+          setSelectedNode((prev) => (prev === touchedNode.current ? null : touchedNode.current));
+        }
+
+        touchedNode.current = null;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, nodeRefs, setSelectedNode]);
+
+    return () => {
+      gl.xr.removeEventListener("sessionstart", onSessionStart);
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
+    };
+  }, [gl, nodeRefs, structureRef, setSelectedNode, onDragStart, onDragMove, onDragEnd]);
 
   return null;
 };
