@@ -3,6 +3,7 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { initARSession, isIOS } from "../../utils/arCompatibility";
+import { setupXRInput } from "../../utils/xrInput";
 
 const ARPage1 = ({ nodes = ["A", "B", "C"], spacing = 6.3 }) => {
   const [selectedNode, setSelectedNode] = useState(null);
@@ -107,45 +108,19 @@ const ARInteractionManager = ({ nodeRefs, setSelectedNode }) => {
       return;
     }
 
-    const onSessionStart = () => {
-      const session = gl.xr.getSession();
-      if (!session) return;
+    const cleanup = setupXRInput(gl, {
+      getCandidates: () => (nodeRefs.current || []).map((g) => (g ? g.children : [])).flat(),
+      onSelect: (hit) => {
+        const idx = hit?.index;
+        if (idx !== undefined) setSelectedNode((prev) => (prev === idx ? null : idx));
+      },
+    });
 
-      const onSelect = () => {
-        const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
-        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
-        const origin = cam.getWorldPosition(new THREE.Vector3());
-        raycaster.set(origin, dir);
-
-        const candidates = (nodeRefs.current || [])
-          .map((group) => (group ? group.children : []))
-          .flat();
-
-        const intersects = raycaster.intersectObjects(candidates, true);
-        if (intersects.length > 0) {
-          let hit = intersects[0].object;
-          while (hit && hit.userData?.nodeIndex === undefined && hit.parent) {
-            hit = hit.parent;
-          }
-          const idx = hit?.userData?.nodeIndex;
-          if (idx !== undefined) {
-            setSelectedNode((prev) => (prev === idx ? null : idx));
-          }
-        }
-      };
-
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+    return () => {
+      try {
+        if (typeof cleanup === "function") cleanup();
+      } catch (e) {}
     };
-
-    gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
   }, [gl, nodeRefs, setSelectedNode]);
 
   return null;

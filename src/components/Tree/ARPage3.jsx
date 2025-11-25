@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { initARSession, isIOS } from "../../utils/arCompatibility";
+import { setupXRInput } from "../../utils/xrInput";
 
 const ARPage3 = () => {
   const [selectedNode, setSelectedNode] = useState(null);

@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { initARSession, isIOS } from "../../utils/arCompatibility";
+import { setupXRInput } from "../../utils/xrInput";
 
 const ARPage1 = ({ data = [35, 10, 25, 5, 15], spacing = 2 }) => {
   const [sorted, setSorted] = useState(false);
@@ -124,36 +125,20 @@ const ARInteractionManager = ({ boxRefs, onSelectBox }) => {
   const { gl } = useThree();
 
   useEffect(() => {
-    if (isIOS()) { return; }
-    const onSessionStart = () => {
-      const session = gl.xr.getSession();
-      if (!session) return;
+    if (isIOS()) return;
 
-      const onSelect = () => {
-        const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
-        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
-        const origin = cam.getWorldPosition(new THREE.Vector3());
-        raycaster.set(origin, dir);
+    const cleanup = setupXRInput(gl, {
+      getCandidates: () => (boxRefs.current || []).map((g) => (g ? g.children : [])).flat(),
+      onSelect: (hit) => {
+        if (hit) onSelectBox();
+      },
+    });
 
-        const candidates = (boxRefs.current || [])
-          .map((group) => (group ? group.children : []))
-          .flat();
-
-        const intersects = raycaster.intersectObjects(candidates, true);
-        if (intersects.length > 0) onSelectBox();
-      };
-
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+    return () => {
+      try {
+        if (typeof cleanup === "function") cleanup();
+      } catch (e) {}
     };
-
-    gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
   }, [gl, boxRefs, onSelectBox]);
 
   return null;

@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { initARSession, isIOS } from "../../utils/arCompatibility";
+import { setupXRInput } from "../../utils/xrInput";
 
 const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   const [showPanel, setShowPanel] = useState(false);
@@ -168,126 +169,41 @@ const ARInteractionManager = ({
   }, [isDragging]);
 
   useEffect(() => {
-    const onSessionStart = () => {
-      const session = gl.xr.getSession();
-      if (!session) return;
+    if (isIOS()) return;
 
-      // Get camera ray (center of phone screen)
-      const getCameraRay = () => {
-        const xrCamera = gl.xr.getCamera();
-        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
-        const origin = cam.getWorldPosition(new THREE.Vector3());
-        return { origin, dir };
-      };
-
-      // Check if pointing at any box
-      const getHitBox = () => {
-        const { origin, dir } = getCameraRay();
-        const raycaster = new THREE.Raycaster();
-        raycaster.set(origin, dir);
-
-        const allMeshes = [];
-        boxRefs.current.forEach((group) => {
-          if (group && group.children) {
-            group.children.forEach((child) => {
-              allMeshes.push(child);
-            });
+    const cleanup = setupXRInput(gl, {
+      getCandidates: () => {
+        const all = [];
+        boxRefs.current.forEach((g) => {
+          if (g && g.children) {
+            g.children.forEach((c) => all.push(c));
           }
         });
-
-        const hits = raycaster.intersectObjects(allMeshes, true);
-        if (hits.length > 0) {
-          let obj = hits[0].object;
-          while (obj) {
-            if (obj.userData?.boxIndex !== undefined) {
-              return obj.userData.boxIndex;
-            }
-            obj = obj.parent;
-          }
-          return -1; // Hit structure but not specific box
+        return all;
+      },
+      onSelect: (hit) => {
+        // short tap/select -> choose box
+        if (hit && hit.index !== undefined && hit.index >= 0) setSelectedBox(hit.index);
+      },
+      onSelectStart: () => {
+        // used for long-press/drag start if needed by app logic
+      },
+      onDragMove: (hit) => {
+        // while dragging, update position using ray hit point
+        if (isDraggingRef.current && hit && hit.point) {
+          onDragMove([hit.point.x, hit.point.y, hit.point.z]);
         }
-        return null;
-      };
-
-      // Calculate 3D position where phone is pointing
-      const getPointPosition = () => {
-        const { origin, dir } = getCameraRay();
-        
-        // Project ray to a distance (e.g., 8 units in front)
-        const distance = 8;
-        const x = origin.x + dir.x * distance;
-        const y = origin.y + dir.y * distance;
-        const z = origin.z + dir.z * distance;
-        
-        return [x, y, z];
-      };
-
-      // Touch start
-      const onSelectStart = () => {
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-        }
-
-        const hitBox = getHitBox();
-        touchedBox.current = hitBox;
-
-        // If touching any part of structure, start long press for drag
-        if (hitBox !== null) {
-          longPressTimer.current = setTimeout(() => {
-            onDragStart();
-            longPressTimer.current = null;
-          }, 500);
-        }
-      };
-
-      // Touch end
-      const onSelectEnd = () => {
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-        }
-
-        if (isDraggingRef.current) {
-          // Drop structure at current position
-          onDragEnd();
-        } else if (touchedBox.current !== null && touchedBox.current >= 0) {
-          // Short tap on box - select it
-          setSelectedBox(touchedBox.current);
-        }
-
-        touchedBox.current = null;
-      };
-
-      session.addEventListener("selectstart", onSelectStart);
-      session.addEventListener("selectend", onSelectEnd);
-
-      // Frame loop - move structure while dragging
-      const onFrame = (time, frame) => {
-        if (isDraggingRef.current) {
-          const newPos = getPointPosition();
-          onDragMove(newPos);
-        }
-        session.requestAnimationFrame(onFrame);
-      };
-      session.requestAnimationFrame(onFrame);
-
-      session.addEventListener("end", () => {
-        session.removeEventListener("selectstart", onSelectStart);
-        session.removeEventListener("selectend", onSelectEnd);
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-        }
-      });
-    };
-
-    gl.xr.addEventListener("sessionstart", onSessionStart);
+      },
+      onSelectEnd: () => {
+        // drop structure
+        if (isDraggingRef.current) onDragEnd();
+      },
+    });
 
     return () => {
-      gl.xr.removeEventListener("sessionstart", onSessionStart);
-      if (longPressTimer.current) {
-        clearTimeout(longPressTimer.current);
-      }
+      try {
+        if (typeof cleanup === "function") cleanup();
+      } catch (e) {}
     };
   }, [gl, boxRefs, structureRef, setSelectedBox, onDragStart, onDragMove, onDragEnd, structurePos]);
 

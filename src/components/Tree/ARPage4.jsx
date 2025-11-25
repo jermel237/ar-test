@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text, Edges } from "@react-three/drei";
 import * as THREE from "three";
 import { initARSession, isIOS } from "../../utils/arCompatibility";
+import { setupXRInput } from "../../utils/xrInput";
 
 const ARPage4 = () => {
   const [selectedOp, setSelectedOp] = useState(null);
@@ -100,41 +101,23 @@ const ARInteractionManager = ({ buttonRefs, onOperation }) => {
   const { gl, camera } = useThree();
 
   useEffect(() => {
-    // Skip AR session setup on iOS
-    if (isIOS()) {
-      return;
-    }
+    if (isIOS()) return;
 
-    const onSessionStart = () => {
-      const session = gl.xr.getSession();
-      if (!session) return;
+    const cleanup = setupXRInput(gl, {
+      getCandidates: () => (buttonRefs.current || []).map((b) => (b ? b.children : [])).flat(),
+      onSelect: (hit) => {
+        let obj = hit?.object;
+        while (obj && obj.userData?.action === undefined && obj.parent) obj = obj.parent;
+        const action = obj?.userData?.action;
+        if (action) onOperation(action);
+      },
+    });
 
-      const onSelect = () => {
-        const xrCamera = gl.xr.getCamera();
-        const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-
-        const raycaster = new THREE.Raycaster();
-        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
-        const origin = cam.getWorldPosition(new THREE.Vector3());
-        raycaster.set(origin, dir);
-
-        const candidates = (buttonRefs.current || []).map((b) => b.children).flat();
-        const intersects = raycaster.intersectObjects(candidates, true);
-
-        if (intersects.length > 0) {
-          let hit = intersects[0].object;
-          while (hit && hit.userData?.action === undefined && hit.parent) hit = hit.parent;
-          const action = hit?.userData?.action;
-          if (action) onOperation(action);
-        }
-      };
-
-      session.addEventListener("select", onSelect);
-      return () => session.removeEventListener("select", onSelect);
+    return () => {
+      try {
+        if (typeof cleanup === "function") cleanup();
+      } catch (e) {}
     };
-
-    gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
   }, [gl, buttonRefs, onOperation]);
 
   return null;
