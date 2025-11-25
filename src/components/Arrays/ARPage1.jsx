@@ -7,9 +7,14 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   const [showPanel, setShowPanel] = useState(false);
   const [page, setPage] = useState(0);
   const [selectedBox, setSelectedBox] = useState(null);
+  
+  // Structure position (whole array moves together)
+  const [structurePos, setStructurePos] = useState([0, 0, -8]);
+  const [isDragging, setIsDragging] = useState(false);
+  
   const boxRefs = useRef([]);
+  const structureRef = useRef();
 
-  // --- Helper to collect box refs ---
   const addBoxRef = (r) => {
     if (r && !boxRefs.current.includes(r)) boxRefs.current.push(r);
   };
@@ -20,9 +25,11 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
   }, [data, spacing]);
 
   const handleClick = (i) => {
-    setSelectedBox(i);
-    setShowPanel(true);
-    setPage(0);
+    if (!isDragging) {
+      setSelectedBox(i);
+      setShowPanel(true);
+      setPage(0);
+    }
   };
 
   const handleNextClick = () => {
@@ -30,7 +37,21 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
     else setShowPanel(false);
   };
 
-  // === Automatically start AR session ===
+  // Drag whole structure
+  const onDragStart = () => {
+    setIsDragging(true);
+    setShowPanel(false);
+    setSelectedBox(null);
+  };
+
+  const onDragMove = (newPos) => {
+    setStructurePos(newPos);
+  };
+
+  const onDragEnd = () => {
+    setIsDragging(false);
+  };
+
   const startAR = (gl) => {
     if (navigator.xr) {
       navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
@@ -56,13 +77,15 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
         camera={{ position: [0, 4, 25], fov: 50 }}
         onCreated={({ gl }) => {
           gl.xr.enabled = true;
-          startAR(gl); // <-- Start AR automatically here
+          startAR(gl);
         }}
       >
         <ambientLight intensity={0.4} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
 
-        <group position={[0, 0, -8]}>
+        {/* Whole structure group - this moves when dragging */}
+        <group position={structurePos} ref={structureRef}>
+          
           <FadeInText
             show={true}
             text={"Array Data Structure"}
@@ -71,7 +94,18 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
             color="white"
           />
 
-          <ArrayBackground data={data} spacing={spacing} />
+          {/* Dragging indicator */}
+          {isDragging && (
+            <FadeInText
+              show={true}
+              text={"✋ Moving Structure..."}
+              position={[0, 4, 0]}
+              fontSize={0.5}
+              color="#f97316"
+            />
+          )}
+
+          <ArrayBackground data={data} spacing={spacing} isDragging={isDragging} />
 
           {data.map((value, i) => (
             <Box
@@ -85,7 +119,7 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
             />
           ))}
 
-          {showPanel && selectedBox !== null && (
+          {showPanel && selectedBox !== null && !isDragging && (
             <DefinitionPanel
               page={page}
               data={data}
@@ -98,62 +132,169 @@ const VisualPageAR = ({ data = [10, 20, 30, 40], spacing = 2.0 }) => {
 
         <ARInteractionManager
           boxRefs={boxRefs}
+          structureRef={structureRef}
           setSelectedBox={setSelectedBox}
+          isDragging={isDragging}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          structurePos={structurePos}
         />
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
   );
 };
 
 // --- AR Interaction Manager ---
-const ARInteractionManager = ({ boxRefs, setSelectedBox }) => {
+const ARInteractionManager = ({
+  boxRefs,
+  structureRef,
+  setSelectedBox,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  structurePos
+}) => {
   const { gl } = useThree();
+  const longPressTimer = useRef(null);
+  const touchedBox = useRef(null);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   useEffect(() => {
     const onSessionStart = () => {
       const session = gl.xr.getSession();
       if (!session) return;
 
-      const onSelect = () => {
+      // Get camera ray (center of phone screen)
+      const getCameraRay = () => {
         const xrCamera = gl.xr.getCamera();
-        const raycaster = new THREE.Raycaster();
         const cam = xrCamera.cameras ? xrCamera.cameras[0] : xrCamera;
-        const dir = new THREE.Vector3(0, 0, -1)
-          .applyQuaternion(cam.quaternion)
-          .normalize();
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
         const origin = cam.getWorldPosition(new THREE.Vector3());
+        return { origin, dir };
+      };
+
+      // Check if pointing at any box
+      const getHitBox = () => {
+        const { origin, dir } = getCameraRay();
+        const raycaster = new THREE.Raycaster();
         raycaster.set(origin, dir);
 
-        const candidates = (boxRefs.current || [])
-          .map((group) => (group ? group.children : []))
-          .flat();
-
-        const intersects = raycaster.intersectObjects(candidates, true);
-        if (intersects.length > 0) {
-          let hit = intersects[0].object;
-          while (hit && hit.userData?.boxIndex === undefined && hit.parent) {
-            hit = hit.parent;
+        const allMeshes = [];
+        boxRefs.current.forEach((group) => {
+          if (group && group.children) {
+            group.children.forEach((child) => {
+              allMeshes.push(child);
+            });
           }
-          const idx = hit?.userData?.boxIndex;
-          if (idx !== undefined) setSelectedBox(idx);
+        });
+
+        const hits = raycaster.intersectObjects(allMeshes, true);
+        if (hits.length > 0) {
+          let obj = hits[0].object;
+          while (obj) {
+            if (obj.userData?.boxIndex !== undefined) {
+              return obj.userData.boxIndex;
+            }
+            obj = obj.parent;
+          }
+          return -1; // Hit structure but not specific box
+        }
+        return null;
+      };
+
+      // Calculate 3D position where phone is pointing
+      const getPointPosition = () => {
+        const { origin, dir } = getCameraRay();
+        
+        // Project ray to a distance (e.g., 8 units in front)
+        const distance = 8;
+        const x = origin.x + dir.x * distance;
+        const y = origin.y + dir.y * distance;
+        const z = origin.z + dir.z * distance;
+        
+        return [x, y, z];
+      };
+
+      // Touch start
+      const onSelectStart = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+
+        const hitBox = getHitBox();
+        touchedBox.current = hitBox;
+
+        // If touching any part of structure, start long press for drag
+        if (hitBox !== null) {
+          longPressTimer.current = setTimeout(() => {
+            onDragStart();
+            longPressTimer.current = null;
+          }, 500);
         }
       };
 
-      session.addEventListener("select", onSelect);
-      const onEnd = () => session.removeEventListener("select", onSelect);
-      session.addEventListener("end", onEnd);
+      // Touch end
+      const onSelectEnd = () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          // Drop structure at current position
+          onDragEnd();
+        } else if (touchedBox.current !== null && touchedBox.current >= 0) {
+          // Short tap on box - select it
+          setSelectedBox(touchedBox.current);
+        }
+
+        touchedBox.current = null;
+      };
+
+      session.addEventListener("selectstart", onSelectStart);
+      session.addEventListener("selectend", onSelectEnd);
+
+      // Frame loop - move structure while dragging
+      const onFrame = (time, frame) => {
+        if (isDraggingRef.current) {
+          const newPos = getPointPosition();
+          onDragMove(newPos);
+        }
+        session.requestAnimationFrame(onFrame);
+      };
+      session.requestAnimationFrame(onFrame);
+
+      session.addEventListener("end", () => {
+        session.removeEventListener("selectstart", onSelectStart);
+        session.removeEventListener("selectend", onSelectEnd);
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+      });
     };
 
     gl.xr.addEventListener("sessionstart", onSessionStart);
-    return () => gl.xr.removeEventListener("sessionstart", onSessionStart);
-  }, [gl, boxRefs, setSelectedBox]);
+
+    return () => {
+      gl.xr.removeEventListener("sessionstart", onSessionStart);
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+      }
+    };
+  }, [gl, boxRefs, structureRef, setSelectedBox, onDragStart, onDragMove, onDragEnd, structurePos]);
 
   return null;
 };
 
 // === Background ===
-const ArrayBackground = ({ data, spacing }) => {
+const ArrayBackground = ({ data, spacing, isDragging }) => {
   const width = Math.max(6, (data.length - 1) * spacing + 3);
   const height = 2.4;
   const boxGeo = useMemo(
@@ -165,10 +306,14 @@ const ArrayBackground = ({ data, spacing }) => {
   return (
     <group position={[0, 0.9, -1]}>
       <mesh geometry={boxGeo}>
-        <meshStandardMaterial color="#0f172a" />
+        <meshStandardMaterial 
+          color={isDragging ? "#1e3a5f" : "#0f172a"} 
+          emissive={isDragging ? "#f97316" : "#000000"}
+          emissiveIntensity={isDragging ? 0.2 : 0}
+        />
       </mesh>
       <lineSegments geometry={edgesGeo}>
-        <lineBasicMaterial />
+        <lineBasicMaterial color={isDragging ? "#f97316" : "#ffffff"} />
       </lineSegments>
     </group>
   );
