@@ -15,6 +15,10 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
   const [isDragging, setIsDragging] = useState(false);
   const [hoverIndex, setHoverIndex] = useState(null);
   
+  // Animation state
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [animatingBoxes, setAnimatingBoxes] = useState(null); // { from, to }
+  
   const boxRefs = useRef([]);
   const hoverIndexRef = useRef(null);
   const draggedBoxRef = useRef(null);
@@ -38,7 +42,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
   };
 
   const handleClick = (i) => {
-    if (!isDragging) {
+    if (!isDragging && !isAnimating) {
       setSelectedBox(i);
       setShowPanel(true);
       setPage(0);
@@ -52,6 +56,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
 
   // Per-box drag functions
   const onDragStart = (index) => {
+    if (isAnimating) return;
     setDraggedBox(index);
     draggedBoxRef.current = index;
     setDragX(positions[index][0]);
@@ -73,27 +78,35 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     const fromIndex = draggedBoxRef.current;
     const toIndex = hoverIndexRef.current;
     
-    console.log("Swap:", fromIndex, "↔", toIndex); // Debug log
-    
-    if (fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
-      // SWAP the two boxes
-      setData(prevData => {
-        const newData = [...prevData];
-        const temp = newData[fromIndex];
-        newData[fromIndex] = newData[toIndex];
-        newData[toIndex] = temp;
-        console.log("New data:", newData); // Debug log
-        return newData;
-      });
-    }
-    
-    // Reset all drag state
+    // Reset drag state first
     setDraggedBox(null);
     draggedBoxRef.current = null;
     setDragX(0);
     setIsDragging(false);
     setHoverIndex(null);
     hoverIndexRef.current = null;
+    
+    // Start animation if swapping
+    if (fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
+      setAnimatingBoxes({ from: fromIndex, to: toIndex });
+      setIsAnimating(true);
+    }
+  };
+
+  // Called when animation completes
+  const onAnimationComplete = () => {
+    if (animatingBoxes) {
+      const { from, to } = animatingBoxes;
+      setData(prevData => {
+        const newData = [...prevData];
+        const temp = newData[from];
+        newData[from] = newData[to];
+        newData[to] = temp;
+        return newData;
+      });
+    }
+    setAnimatingBoxes(null);
+    setIsAnimating(false);
   };
 
   const startAR = (gl) => {
@@ -136,7 +149,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
             color="white"
           />
 
-          {/* Dragging indicator */}
+          {/* Status indicator */}
           {isDragging && draggedBox !== null && (
             <FadeInText
               show={true}
@@ -151,33 +164,53 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
             />
           )}
 
+          {/* Animation indicator */}
+          {isAnimating && animatingBoxes && (
+            <FadeInText
+              show={true}
+              text={`✨ Swapping [${animatingBoxes.from}] ↔ [${animatingBoxes.to}]`}
+              position={[0, 2.3, 0]}
+              fontSize={0.4}
+              color="#4ade80"
+            />
+          )}
+
           {/* Boxes */}
           {data.map((value, i) => {
             const isBeingDragged = draggedBox === i;
             const isSwapTarget = isDragging && hoverIndex === i && draggedBox !== i;
             
-            // Position: dragged box follows dragX, others stay in place
-            const boxPosition = isBeingDragged 
-              ? [dragX, 0.8, 0.5]  // Lifted position for dragged box
-              : positions[i];
+            // Determine animation target
+            let animationTarget = null;
+            if (isAnimating && animatingBoxes) {
+              if (i === animatingBoxes.from) {
+                animationTarget = positions[animatingBoxes.to];
+              } else if (i === animatingBoxes.to) {
+                animationTarget = positions[animatingBoxes.from];
+              }
+            }
             
             return (
-              <Box
-                key={`box-${i}-${value}`}
+              <AnimatedBox
+                key={`box-${i}`}
                 index={i}
                 value={value}
-                position={boxPosition}
+                basePosition={positions[i]}
+                dragPosition={isBeingDragged ? [dragX, 0.8, 0.5] : null}
+                animationTarget={animationTarget}
                 selected={selectedBox === i}
                 isDragging={isBeingDragged}
                 isSwapTarget={isSwapTarget}
                 isOtherDragging={isDragging && !isBeingDragged && !isSwapTarget}
+                isAnimating={animationTarget !== null}
                 onClick={() => handleClick(i)}
+                onAnimationComplete={i === animatingBoxes?.from ? onAnimationComplete : null}
                 ref={(r) => addBoxRef(r, i)}
               />
             );
           })}
 
-          {showPanel && selectedBox !== null && !isDragging && (
+          {showPanel && selectedBox !== null && !isDragging && !isAnimating && (
             <DefinitionPanel
               page={page}
               data={data}
@@ -192,6 +225,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
           boxRefs={boxRefs}
           setSelectedBox={setSelectedBox}
           isDragging={isDragging}
+          isAnimating={isAnimating}
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
@@ -199,7 +233,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
           spacing={spacing}
           dataLength={data.length}
         />
-        <OrbitControls makeDefault enabled={!isDragging} />
+        <OrbitControls makeDefault enabled={!isDragging && !isAnimating} />
       </Canvas>
     </div>
   );
@@ -210,6 +244,7 @@ const ARInteractionManager = ({
   boxRefs,
   setSelectedBox,
   isDragging,
+  isAnimating,
   onDragStart,
   onDragMove,
   onDragEnd,
@@ -286,6 +321,8 @@ const ARInteractionManager = ({
       };
 
       const onSelectStart = () => {
+        if (isAnimating) return;
+        
         if (longPressTimer.current) {
           clearTimeout(longPressTimer.current);
         }
@@ -309,7 +346,7 @@ const ARInteractionManager = ({
 
         if (isDraggingRef.current) {
           onDragEnd();
-        } else if (touchedBoxIndex.current !== null) {
+        } else if (touchedBoxIndex.current !== null && !isAnimating) {
           setSelectedBox(touchedBoxIndex.current);
         }
 
@@ -345,10 +382,209 @@ const ARInteractionManager = ({
         clearTimeout(longPressTimer.current);
       }
     };
-  }, [gl, boxRefs, setSelectedBox, onDragStart, onDragMove, onDragEnd, positions, spacing, dataLength]);
+  }, [gl, boxRefs, setSelectedBox, onDragStart, onDragMove, onDragEnd, positions, spacing, dataLength, isAnimating]);
 
   return null;
 };
+
+// === Animated Box with smooth sliding ===
+const AnimatedBox = forwardRef(({ 
+  index, 
+  value, 
+  basePosition, 
+  dragPosition,
+  animationTarget,
+  selected, 
+  isDragging, 
+  isSwapTarget, 
+  isOtherDragging,
+  isAnimating,
+  onClick,
+  onAnimationComplete
+}, ref) => {
+  const size = [1.6, 1.2, 1];
+  const groupRef = useRef();
+  const currentPosition = useRef(new THREE.Vector3(...basePosition));
+  const animationProgress = useRef(0);
+  const animationDuration = 0.5; // seconds
+
+  const getColor = () => {
+    if (isDragging) return "#f97316";
+    if (isSwapTarget) return "#4ade80";
+    if (isAnimating) return "#a78bfa"; // Purple during animation
+    if (selected) return "#facc15";
+    if (isOtherDragging) return "#94a3b8";
+    return index % 2 === 0 ? "#60a5fa" : "#34d399";
+  };
+
+  useEffect(() => {
+    if (groupRef.current) groupRef.current.userData = { boxIndex: index };
+  }, [index]);
+
+  // Reset animation progress when animation starts
+  useEffect(() => {
+    if (isAnimating) {
+      animationProgress.current = 0;
+    }
+  }, [isAnimating]);
+
+  // Smooth animation using useFrame
+  useFrame((state, delta) => {
+    if (!groupRef.current) return;
+
+    let targetPos;
+    let liftY = 0;
+
+    if (isDragging && dragPosition) {
+      // While dragging - follow drag position
+      targetPos = new THREE.Vector3(...dragPosition);
+      liftY = 0.8;
+    } else if (isAnimating && animationTarget) {
+      // Animate to target position with arc
+      animationProgress.current += delta / animationDuration;
+      const t = Math.min(animationProgress.current, 1);
+      
+      // Ease in-out function
+      const easeInOut = t < 0.5 
+        ? 4 * t * t * t 
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      
+      // Interpolate X position
+      const startX = basePosition[0];
+      const endX = animationTarget[0];
+      const currentX = startX + (endX - startX) * easeInOut;
+      
+      // Arc motion - lift up in the middle
+      const arcHeight = 1.5;
+      const arc = Math.sin(t * Math.PI) * arcHeight;
+      
+      targetPos = new THREE.Vector3(currentX, arc, 0);
+      
+      // Call completion callback when done
+      if (t >= 1 && onAnimationComplete) {
+        onAnimationComplete();
+      }
+    } else {
+      // Normal position
+      targetPos = new THREE.Vector3(...basePosition);
+    }
+
+    // Smooth lerp to target
+    const lerpSpeed = isDragging ? 0.3 : 0.15;
+    currentPosition.current.lerp(targetPos, lerpSpeed);
+    
+    groupRef.current.position.copy(currentPosition.current);
+  });
+
+  return (
+    <group
+      ref={(g) => {
+        groupRef.current = g;
+        if (typeof ref === "function") ref(g);
+        else if (ref) ref.current = g;
+      }}
+    >
+      <mesh
+        castShadow
+        receiveShadow
+        position={[0, size[1] / 2, 0]}
+        onClick={onClick}
+      >
+        <boxGeometry args={
+          isDragging || isAnimating 
+            ? [size[0] * 1.1, size[1] * 1.1, size[2] * 1.1] 
+            : size
+        } />
+        <meshStandardMaterial
+          color={getColor()}
+          emissive={
+            isDragging ? "#f97316" 
+            : isSwapTarget ? "#4ade80" 
+            : isAnimating ? "#a78bfa"
+            : selected ? "#fbbf24" 
+            : "#000000"
+          }
+          emissiveIntensity={isDragging || isAnimating ? 0.6 : isSwapTarget ? 0.5 : selected ? 0.4 : 0}
+          transparent={isOtherDragging}
+          opacity={isOtherDragging ? 0.5 : 1}
+        />
+      </mesh>
+
+      <Text
+        position={[0, size[1] / 2 + 0.15, size[2] / 2 + 0.01]}
+        fontSize={0.4}
+        color="white"
+        anchorX="center"
+        anchorY="middle"
+      >
+        {String(value)}
+      </Text>
+
+      <Text
+        position={[0, -0.3, size[2] / 2 + 0.01]}
+        fontSize={0.3}
+        color={
+          isDragging ? "#f97316" 
+          : isSwapTarget ? "#4ade80" 
+          : isAnimating ? "#a78bfa"
+          : "yellow"
+        }
+        anchorX="center"
+        anchorY="middle"
+      >
+        [{index}]
+      </Text>
+
+      {selected && !isDragging && !isSwapTarget && !isAnimating && (
+        <Text
+          position={[0, size[1] + 0.8, 0]}
+          fontSize={0.3}
+          color="#fde68a"
+          anchorX="center"
+          anchorY="middle"
+        >
+          Value {value} at index {index}
+        </Text>
+      )}
+
+      {isDragging && (
+        <Text
+          position={[0, size[1] + 1, 0]}
+          fontSize={0.3}
+          color="#f97316"
+          anchorX="center"
+          anchorY="middle"
+        >
+          ✋ Dragging
+        </Text>
+      )}
+
+      {isSwapTarget && (
+        <Text
+          position={[0, size[1] + 1, 0]}
+          fontSize={0.3}
+          color="#4ade80"
+          anchorX="center"
+          anchorY="middle"
+        >
+          🔄 Swap here
+        </Text>
+      )}
+
+      {isAnimating && (
+        <Text
+          position={[0, size[1] + 1, 0]}
+          fontSize={0.3}
+          color="#a78bfa"
+          anchorX="center"
+          anchorY="middle"
+        >
+          ✨ Moving...
+        </Text>
+      )}
+    </group>
+  );
+});
 
 // === Fade-in Text ===
 const FadeInText = ({ show, text, position, fontSize, color }) => {
@@ -386,107 +622,6 @@ const FadeInText = ({ show, text, position, fontSize, color }) => {
     </Text>
   );
 };
-
-// === Box ===
-const Box = forwardRef(({ index, value, position, selected, isDragging, isSwapTarget, isOtherDragging, onClick }, ref) => {
-  const size = [1.6, 1.2, 1];
-  const groupRef = useRef();
-
-  const getColor = () => {
-    if (isDragging) return "#f97316";
-    if (isSwapTarget) return "#4ade80";
-    if (selected) return "#facc15";
-    if (isOtherDragging) return "#94a3b8";
-    return index % 2 === 0 ? "#60a5fa" : "#34d399";
-  };
-
-  useEffect(() => {
-    if (groupRef.current) groupRef.current.userData = { boxIndex: index };
-  }, [index]);
-
-  return (
-    <group
-      position={position}
-      ref={(g) => {
-        groupRef.current = g;
-        if (typeof ref === "function") ref(g);
-        else if (ref) ref.current = g;
-      }}
-    >
-      <mesh
-        castShadow
-        receiveShadow
-        position={[0, size[1] / 2, 0]}
-        onClick={onClick}
-      >
-        <boxGeometry args={isDragging ? [size[0] * 1.1, size[1] * 1.1, size[2] * 1.1] : size} />
-        <meshStandardMaterial
-          color={getColor()}
-          emissive={isDragging ? "#f97316" : isSwapTarget ? "#4ade80" : selected ? "#fbbf24" : "#000000"}
-          emissiveIntensity={isDragging ? 0.6 : isSwapTarget ? 0.5 : selected ? 0.4 : 0}
-          transparent={isOtherDragging}
-          opacity={isOtherDragging ? 0.5 : 1}
-        />
-      </mesh>
-
-      <Text
-        position={[0, size[1] / 2 + 0.15, size[2] / 2 + 0.01]}
-        fontSize={0.4}
-        color="white"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {String(value)}
-      </Text>
-
-      <Text
-        position={[0, -0.3, size[2] / 2 + 0.01]}
-        fontSize={0.3}
-        color={isDragging ? "#f97316" : isSwapTarget ? "#4ade80" : "yellow"}
-        anchorX="center"
-        anchorY="middle"
-      >
-        [{index}]
-      </Text>
-
-      {selected && !isDragging && !isSwapTarget && (
-        <Text
-          position={[0, size[1] + 0.8, 0]}
-          fontSize={0.3}
-          color="#fde68a"
-          anchorX="center"
-          anchorY="middle"
-        >
-          Value {value} at index {index}
-        </Text>
-      )}
-
-      {isDragging && (
-        <Text
-          position={[0, size[1] + 1, 0]}
-          fontSize={0.3}
-          color="#f97316"
-          anchorX="center"
-          anchorY="middle"
-        >
-          ✋ Dragging
-        </Text>
-      )}
-
-      {isSwapTarget && (
-        <Text
-          position={[0, size[1] + 1, 0]}
-          fontSize={0.3}
-          color="#4ade80"
-          anchorX="center"
-          anchorY="middle"
-        >
-          🔄 Swap here
-        </Text>
-      )}
-    </group>
-  );
-});
 
 // === Definition Panel ===
 const DefinitionPanel = ({ page, data, index, position, onNextClick }) => {
