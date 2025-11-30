@@ -13,6 +13,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
   const [draggedBox, setDraggedBox] = useState(null);
   const [dragPosition, setDragPosition] = useState([0, 0, 0]);
   const [isDragging, setIsDragging] = useState(false);
+  const [hoverIndex, setHoverIndex] = useState(null); // Which position we're hovering over
   
   const boxRefs = useRef([]);
 
@@ -40,37 +41,42 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     else setShowPanel(false);
   };
 
+  // Calculate which index the dragged box is hovering over
+  const calculateHoverIndex = (x) => {
+    const mid = (data.length - 1) / 2;
+    const index = Math.round(x / spacing + mid);
+    return Math.max(0, Math.min(data.length - 1, index));
+  };
+
   // Per-box drag functions
   const onDragStart = (index) => {
     setDraggedBox(index);
-    setDragPosition(positions[index]);
+    setDragPosition([positions[index][0], 0.8, 0.5]); // Lift up
     setIsDragging(true);
+    setHoverIndex(index);
     setShowPanel(false);
     setSelectedBox(null);
   };
 
   const onDragMove = (newX) => {
-    setDragPosition([newX, 0.5, 0.5]); // Lift box up and forward when dragging
+    setDragPosition([newX, 0.8, 0.5]); // Keep lifted while dragging
+    const newHoverIndex = calculateHoverIndex(newX);
+    setHoverIndex(newHoverIndex);
   };
 
   const onDragEnd = () => {
-    if (draggedBox !== null) {
-      // Calculate drop index based on X position
-      const mid = (data.length - 1) / 2;
-      const dropIndex = Math.round(dragPosition[0] / spacing + mid);
-      const clampedIndex = Math.max(0, Math.min(data.length - 1, dropIndex));
-
-      // Reorder array if dropped at different position
-      if (clampedIndex !== draggedBox) {
-        const newData = [...data];
-        const [removed] = newData.splice(draggedBox, 1);
-        newData.splice(clampedIndex, 0, removed);
-        setData(newData);
-      }
+    if (draggedBox !== null && hoverIndex !== null && hoverIndex !== draggedBox) {
+      // SWAP the two boxes
+      const newData = [...data];
+      const temp = newData[draggedBox];
+      newData[draggedBox] = newData[hoverIndex];
+      newData[hoverIndex] = temp;
+      setData(newData);
     }
     setDraggedBox(null);
     setDragPosition([0, 0, 0]);
     setIsDragging(false);
+    setHoverIndex(null);
   };
 
   const startAR = (gl) => {
@@ -113,32 +119,25 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
             color="white"
           />
 
-          {/* Dragging indicator */}
+          {/* Dragging indicator - shows swap info */}
           {isDragging && draggedBox !== null && (
             <FadeInText
               show={true}
-              text={`✋ Moving box [${draggedBox}]...`}
+              text={
+                hoverIndex !== null && hoverIndex !== draggedBox
+                  ? `🔄 Swap [${draggedBox}] ↔ [${hoverIndex}]`
+                  : `✋ Moving [${draggedBox}]...`
+              }
               position={[0, 2.3, 0]}
               fontSize={0.4}
-              color="#f97316"
+              color={hoverIndex !== null && hoverIndex !== draggedBox ? "#4ade80" : "#f97316"}
             />
           )}
-
-          {/* Drop zone indicators when dragging */}
-          {isDragging && data.map((_, i) => (
-            <DropZone
-              key={`drop-${i}`}
-              index={i}
-              position={positions[i]}
-              isActive={draggedBox !== i}
-              dragX={dragPosition[0]}
-              spacing={spacing}
-            />
-          ))}
 
           {/* Boxes */}
           {data.map((value, i) => {
             const isBeingDragged = draggedBox === i;
+            const isSwapTarget = isDragging && hoverIndex === i && draggedBox !== i;
             const boxPos = isBeingDragged ? dragPosition : positions[i];
             
             return (
@@ -149,7 +148,8 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
                 position={boxPos}
                 selected={selectedBox === i}
                 isDragging={isBeingDragged}
-                isOtherDragging={isDragging && !isBeingDragged}
+                isSwapTarget={isSwapTarget}
+                isOtherDragging={isDragging && !isBeingDragged && !isSwapTarget}
                 onClick={() => handleClick(i)}
                 ref={(r) => addBoxRef(r, i)}
               />
@@ -182,40 +182,6 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
         <OrbitControls makeDefault enabled={!isDragging} />
       </Canvas>
     </div>
-  );
-};
-
-// === Drop Zone Indicator ===
-const DropZone = ({ index, position, isActive, dragX, spacing }) => {
-  // Calculate if dragged box is near this zone
-  const distance = Math.abs(dragX - position[0]);
-  const isNear = distance < spacing * 0.6;
-  
-  if (!isActive) return null;
-
-  return (
-    <group position={[position[0], -0.5, position[2] || 0]}>
-      {/* Drop zone indicator */}
-      <mesh>
-        <boxGeometry args={[spacing * 0.8, 0.1, 1.2]} />
-        <meshStandardMaterial
-          color={isNear ? "#4ade80" : "#60a5fa"}
-          transparent
-          opacity={isNear ? 0.8 : 0.3}
-          emissive={isNear ? "#4ade80" : "#60a5fa"}
-          emissiveIntensity={isNear ? 0.5 : 0.1}
-        />
-      </mesh>
-      <Text
-        position={[0, 0.3, 0.7]}
-        fontSize={0.2}
-        color={isNear ? "#4ade80" : "#94a3b8"}
-        anchorX="center"
-        anchorY="middle"
-      >
-        [{index}]
-      </Text>
-    </group>
   );
 };
 
@@ -304,8 +270,8 @@ const ARInteractionManager = ({
           const x = origin.x + dir.x * t;
           // Clamp X within array bounds
           const mid = (dataLength - 1) / 2;
-          const minX = -mid * spacing - spacing;
-          const maxX = mid * spacing + spacing;
+          const minX = -mid * spacing - spacing * 0.5;
+          const maxX = mid * spacing + spacing * 0.5;
           return Math.max(minX, Math.min(maxX, x));
         }
         return 0;
@@ -337,7 +303,7 @@ const ARInteractionManager = ({
         }
 
         if (isDraggingRef.current) {
-          // End drag
+          // End drag - swap will happen
           onDragEnd();
         } else if (touchedBoxIndex.current !== null) {
           // Short tap = select
@@ -420,13 +386,14 @@ const FadeInText = ({ show, text, position, fontSize, color }) => {
 };
 
 // === Box ===
-const Box = forwardRef(({ index, value, position, selected, isDragging, isOtherDragging, onClick }, ref) => {
+const Box = forwardRef(({ index, value, position, selected, isDragging, isSwapTarget, isOtherDragging, onClick }, ref) => {
   const size = [1.6, 1.2, 1];
   const groupRef = useRef();
 
   // Color based on state
   const getColor = () => {
     if (isDragging) return "#f97316"; // Orange when dragging
+    if (isSwapTarget) return "#4ade80"; // Green when swap target
     if (selected) return "#facc15"; // Yellow when selected
     if (isOtherDragging) return "#94a3b8"; // Gray when another box is dragging
     return index % 2 === 0 ? "#60a5fa" : "#34d399"; // Default alternating colors
@@ -451,13 +418,13 @@ const Box = forwardRef(({ index, value, position, selected, isDragging, isOtherD
         position={[0, size[1] / 2, 0]}
         onClick={onClick}
       >
-        <boxGeometry args={isDragging ? [size[0] * 1.05, size[1] * 1.05, size[2] * 1.05] : size} />
+        <boxGeometry args={isDragging ? [size[0] * 1.1, size[1] * 1.1, size[2] * 1.1] : size} />
         <meshStandardMaterial
           color={getColor()}
-          emissive={isDragging ? "#f97316" : selected ? "#fbbf24" : "#000000"}
-          emissiveIntensity={isDragging ? 0.6 : selected ? 0.4 : 0}
+          emissive={isDragging ? "#f97316" : isSwapTarget ? "#4ade80" : selected ? "#fbbf24" : "#000000"}
+          emissiveIntensity={isDragging ? 0.6 : isSwapTarget ? 0.5 : selected ? 0.4 : 0}
           transparent={isOtherDragging}
-          opacity={isOtherDragging ? 0.6 : 1}
+          opacity={isOtherDragging ? 0.5 : 1}
         />
       </mesh>
 
@@ -475,7 +442,7 @@ const Box = forwardRef(({ index, value, position, selected, isDragging, isOtherD
         <Text
           position={[0, 0, 0.01]}
           fontSize={0.3}
-          color={isDragging ? "#f97316" : "yellow"}
+          color={isDragging ? "#f97316" : isSwapTarget ? "#4ade80" : "yellow"}
           anchorX="center"
           anchorY="middle"
         >
@@ -484,7 +451,7 @@ const Box = forwardRef(({ index, value, position, selected, isDragging, isOtherD
       </mesh>
 
       {/* Selection label */}
-      {selected && !isDragging && (
+      {selected && !isDragging && !isSwapTarget && (
         <Text
           position={[0, size[1] + 0.8, 0]}
           fontSize={0.3}
@@ -505,7 +472,20 @@ const Box = forwardRef(({ index, value, position, selected, isDragging, isOtherD
           anchorX="center"
           anchorY="middle"
         >
-          ✋ Dragging...
+          ✋ Dragging
+        </Text>
+      )}
+
+      {/* Swap target label */}
+      {isSwapTarget && (
+        <Text
+          position={[0, size[1] + 1, 0]}
+          fontSize={0.3}
+          color="#4ade80"
+          anchorX="center"
+          anchorY="middle"
+        >
+          🔄 Swap here
         </Text>
       )}
     </group>
