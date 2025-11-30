@@ -9,7 +9,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
   const [page, setPage] = useState(0);
   const [selectedBox, setSelectedBox] = useState(null);
   
-  // Per-box drag state
+  // Drag state
   const [draggedBox, setDraggedBox] = useState(null);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -17,7 +17,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
   
   // Animation state
   const [isAnimating, setIsAnimating] = useState(false);
-  const [animatingBoxes, setAnimatingBoxes] = useState(null); // { from, to }
+  const [targetPositions, setTargetPositions] = useState({}); // { boxIndex: targetX }
   
   const boxRefs = useRef([]);
   const hoverIndexRef = useRef(null);
@@ -29,6 +29,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     }
   };
 
+  // Calculate base positions
   const positions = useMemo(() => {
     const mid = (data.length - 1) / 2;
     return data.map((_, i) => [(i - mid) * spacing, 0, 0]);
@@ -54,7 +55,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     else setShowPanel(false);
   };
 
-  // Per-box drag functions
+  // Drag functions
   const onDragStart = (index) => {
     if (isAnimating) return;
     setDraggedBox(index);
@@ -78,7 +79,7 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     const fromIndex = draggedBoxRef.current;
     const toIndex = hoverIndexRef.current;
     
-    // Reset drag state first
+    // Reset drag state
     setDraggedBox(null);
     draggedBoxRef.current = null;
     setDragX(0);
@@ -86,27 +87,47 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     setHoverIndex(null);
     hoverIndexRef.current = null;
     
-    // Start animation if swapping
+    // Start sliding animation if moving to different position
     if (fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
-      setAnimatingBoxes({ from: fromIndex, to: toIndex });
+      // Calculate new positions for all affected boxes
+      const newTargets = {};
+      const mid = (data.length - 1) / 2;
+      
+      if (fromIndex < toIndex) {
+        // Moving right: boxes in between shift left
+        // Dragged box goes to toIndex position
+        newTargets[fromIndex] = (toIndex - mid) * spacing;
+        
+        // Boxes between fromIndex+1 and toIndex shift left by 1
+        for (let i = fromIndex + 1; i <= toIndex; i++) {
+          newTargets[i] = (i - 1 - mid) * spacing;
+        }
+      } else {
+        // Moving left: boxes in between shift right
+        // Dragged box goes to toIndex position
+        newTargets[fromIndex] = (toIndex - mid) * spacing;
+        
+        // Boxes between toIndex and fromIndex-1 shift right by 1
+        for (let i = toIndex; i < fromIndex; i++) {
+          newTargets[i] = (i + 1 - mid) * spacing;
+        }
+      }
+      
+      setTargetPositions(newTargets);
       setIsAnimating(true);
+      
+      // After animation completes, update data
+      setTimeout(() => {
+        setData(prevData => {
+          const newData = [...prevData];
+          const [removed] = newData.splice(fromIndex, 1);
+          newData.splice(toIndex, 0, removed);
+          return newData;
+        });
+        setTargetPositions({});
+        setIsAnimating(false);
+      }, 400); // Animation duration
     }
-  };
-
-  // Called when animation completes
-  const onAnimationComplete = () => {
-    if (animatingBoxes) {
-      const { from, to } = animatingBoxes;
-      setData(prevData => {
-        const newData = [...prevData];
-        const temp = newData[from];
-        newData[from] = newData[to];
-        newData[to] = temp;
-        return newData;
-      });
-    }
-    setAnimatingBoxes(null);
-    setIsAnimating(false);
   };
 
   const startAR = (gl) => {
@@ -155,8 +176,8 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
               show={true}
               text={
                 hoverIndex !== null && hoverIndex !== draggedBox
-                  ? `🔄 Swap [${draggedBox}] ↔ [${hoverIndex}]`
-                  : `✋ Moving [${draggedBox}]...`
+                  ? `📍 Move to position [${hoverIndex}]`
+                  : `✋ Dragging [${draggedBox}]`
               }
               position={[0, 2.3, 0]}
               fontSize={0.4}
@@ -164,47 +185,26 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
             />
           )}
 
-          {/* Animation indicator */}
-          {isAnimating && animatingBoxes && (
-            <FadeInText
-              show={true}
-              text={`✨ Swapping [${animatingBoxes.from}] ↔ [${animatingBoxes.to}]`}
-              position={[0, 2.3, 0]}
-              fontSize={0.4}
-              color="#4ade80"
-            />
-          )}
-
           {/* Boxes */}
           {data.map((value, i) => {
             const isBeingDragged = draggedBox === i;
-            const isSwapTarget = isDragging && hoverIndex === i && draggedBox !== i;
-            
-            // Determine animation target
-            let animationTarget = null;
-            if (isAnimating && animatingBoxes) {
-              if (i === animatingBoxes.from) {
-                animationTarget = positions[animatingBoxes.to];
-              } else if (i === animatingBoxes.to) {
-                animationTarget = positions[animatingBoxes.from];
-              }
-            }
+            const isDropTarget = isDragging && hoverIndex === i && draggedBox !== i;
+            const hasAnimationTarget = targetPositions[i] !== undefined;
             
             return (
-              <AnimatedBox
+              <SlidingBox
                 key={`box-${i}`}
                 index={i}
                 value={value}
                 basePosition={positions[i]}
-                dragPosition={isBeingDragged ? [dragX, 0.8, 0.5] : null}
-                animationTarget={animationTarget}
+                dragX={isBeingDragged ? dragX : null}
+                targetX={hasAnimationTarget ? targetPositions[i] : null}
                 selected={selectedBox === i}
                 isDragging={isBeingDragged}
-                isSwapTarget={isSwapTarget}
-                isOtherDragging={isDragging && !isBeingDragged && !isSwapTarget}
-                isAnimating={animationTarget !== null}
+                isDropTarget={isDropTarget}
+                isSliding={hasAnimationTarget}
+                isOtherDragging={isDragging && !isBeingDragged}
                 onClick={() => handleClick(i)}
-                onAnimationComplete={i === animatingBoxes?.from ? onAnimationComplete : null}
                 ref={(r) => addBoxRef(r, i)}
               />
             );
@@ -229,7 +229,6 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
-          positions={positions}
           spacing={spacing}
           dataLength={data.length}
         />
@@ -238,6 +237,161 @@ const VisualPageAR = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =
     </div>
   );
 };
+
+// === Sliding Box - Simple horizontal slide ===
+const SlidingBox = forwardRef(({ 
+  index, 
+  value, 
+  basePosition, 
+  dragX,
+  targetX,
+  selected, 
+  isDragging, 
+  isDropTarget, 
+  isSliding,
+  isOtherDragging,
+  onClick
+}, ref) => {
+  const size = [1.6, 1.2, 1];
+  const groupRef = useRef();
+  const currentX = useRef(basePosition[0]);
+
+  const getColor = () => {
+    if (isDragging) return "#f97316"; // Orange
+    if (isDropTarget) return "#4ade80"; // Green
+    if (isSliding) return "#60a5fa"; // Blue (sliding)
+    if (selected) return "#facc15"; // Yellow
+    if (isOtherDragging) return "#94a3b8"; // Gray
+    return index % 2 === 0 ? "#60a5fa" : "#34d399";
+  };
+
+  useEffect(() => {
+    if (groupRef.current) groupRef.current.userData = { boxIndex: index };
+  }, [index]);
+
+  // Reset position when base changes (after data reorder)
+  useEffect(() => {
+    if (!isDragging && !isSliding) {
+      currentX.current = basePosition[0];
+    }
+  }, [basePosition, isDragging, isSliding]);
+
+  // Smooth sliding animation
+  useFrame(() => {
+    if (!groupRef.current) return;
+
+    let targetXPos;
+    let yPos = 0;
+
+    if (isDragging && dragX !== null) {
+      // Dragging - follow drag position, lifted up
+      targetXPos = dragX;
+      yPos = 0.5;
+    } else if (isSliding && targetX !== null) {
+      // Sliding to new position
+      targetXPos = targetX;
+      yPos = 0;
+    } else {
+      // Normal position
+      targetXPos = basePosition[0];
+      yPos = 0;
+    }
+
+    // Smooth lerp - simple horizontal slide
+    const lerpSpeed = isDragging ? 0.25 : 0.12;
+    currentX.current += (targetXPos - currentX.current) * lerpSpeed;
+
+    // Apply position
+    groupRef.current.position.x = currentX.current;
+    groupRef.current.position.y = yPos;
+    groupRef.current.position.z = isDragging ? 0.5 : 0;
+  });
+
+  return (
+    <group
+      ref={(g) => {
+        groupRef.current = g;
+        if (typeof ref === "function") ref(g);
+        else if (ref) ref.current = g;
+      }}
+    >
+      <mesh
+        castShadow
+        receiveShadow
+        position={[0, size[1] / 2, 0]}
+        onClick={onClick}
+      >
+        <boxGeometry args={isDragging ? [size[0] * 1.05, size[1] * 1.05, size[2] * 1.05] : size} />
+        <meshStandardMaterial
+          color={getColor()}
+          emissive={isDragging ? "#f97316" : isDropTarget ? "#4ade80" : selected ? "#fbbf24" : "#000000"}
+          emissiveIntensity={isDragging ? 0.5 : isDropTarget ? 0.4 : selected ? 0.3 : 0}
+          transparent={isOtherDragging && !isDropTarget}
+          opacity={isOtherDragging && !isDropTarget ? 0.6 : 1}
+        />
+      </mesh>
+
+      {/* Value text */}
+      <Text
+        position={[0, size[1] / 2 + 0.15, size[2] / 2 + 0.01]}
+        fontSize={0.4}
+        color="white"
+        anchorX="center"
+        anchorY="middle"
+      >
+        {String(value)}
+      </Text>
+
+      {/* Index text */}
+      <Text
+        position={[0, -0.3, size[2] / 2 + 0.01]}
+        fontSize={0.3}
+        color={isDragging ? "#f97316" : isDropTarget ? "#4ade80" : "yellow"}
+        anchorX="center"
+        anchorY="middle"
+      >
+        [{index}]
+      </Text>
+
+      {/* Labels */}
+      {selected && !isDragging && !isDropTarget && (
+        <Text
+          position={[0, size[1] + 0.8, 0]}
+          fontSize={0.3}
+          color="#fde68a"
+          anchorX="center"
+          anchorY="middle"
+        >
+          Value {value} at index {index}
+        </Text>
+      )}
+
+      {isDragging && (
+        <Text
+          position={[0, size[1] + 0.8, 0]}
+          fontSize={0.28}
+          color="#f97316"
+          anchorX="center"
+          anchorY="middle"
+        >
+          ✋ Dragging
+        </Text>
+      )}
+
+      {isDropTarget && (
+        <Text
+          position={[0, size[1] + 0.8, 0]}
+          fontSize={0.28}
+          color="#4ade80"
+          anchorX="center"
+          anchorY="middle"
+        >
+          ← Drop here
+        </Text>
+      )}
+    </group>
+  );
+});
 
 // --- AR Interaction Manager ---
 const ARInteractionManager = ({
@@ -248,7 +402,6 @@ const ARInteractionManager = ({
   onDragStart,
   onDragMove,
   onDragEnd,
-  positions,
   spacing,
   dataLength
 }) => {
@@ -382,209 +535,10 @@ const ARInteractionManager = ({
         clearTimeout(longPressTimer.current);
       }
     };
-  }, [gl, boxRefs, setSelectedBox, onDragStart, onDragMove, onDragEnd, positions, spacing, dataLength, isAnimating]);
+  }, [gl, boxRefs, setSelectedBox, onDragStart, onDragMove, onDragEnd, spacing, dataLength, isAnimating]);
 
   return null;
 };
-
-// === Animated Box with smooth sliding ===
-const AnimatedBox = forwardRef(({ 
-  index, 
-  value, 
-  basePosition, 
-  dragPosition,
-  animationTarget,
-  selected, 
-  isDragging, 
-  isSwapTarget, 
-  isOtherDragging,
-  isAnimating,
-  onClick,
-  onAnimationComplete
-}, ref) => {
-  const size = [1.6, 1.2, 1];
-  const groupRef = useRef();
-  const currentPosition = useRef(new THREE.Vector3(...basePosition));
-  const animationProgress = useRef(0);
-  const animationDuration = 0.5; // seconds
-
-  const getColor = () => {
-    if (isDragging) return "#f97316";
-    if (isSwapTarget) return "#4ade80";
-    if (isAnimating) return "#a78bfa"; // Purple during animation
-    if (selected) return "#facc15";
-    if (isOtherDragging) return "#94a3b8";
-    return index % 2 === 0 ? "#60a5fa" : "#34d399";
-  };
-
-  useEffect(() => {
-    if (groupRef.current) groupRef.current.userData = { boxIndex: index };
-  }, [index]);
-
-  // Reset animation progress when animation starts
-  useEffect(() => {
-    if (isAnimating) {
-      animationProgress.current = 0;
-    }
-  }, [isAnimating]);
-
-  // Smooth animation using useFrame
-  useFrame((state, delta) => {
-    if (!groupRef.current) return;
-
-    let targetPos;
-    let liftY = 0;
-
-    if (isDragging && dragPosition) {
-      // While dragging - follow drag position
-      targetPos = new THREE.Vector3(...dragPosition);
-      liftY = 0.8;
-    } else if (isAnimating && animationTarget) {
-      // Animate to target position with arc
-      animationProgress.current += delta / animationDuration;
-      const t = Math.min(animationProgress.current, 1);
-      
-      // Ease in-out function
-      const easeInOut = t < 0.5 
-        ? 4 * t * t * t 
-        : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      
-      // Interpolate X position
-      const startX = basePosition[0];
-      const endX = animationTarget[0];
-      const currentX = startX + (endX - startX) * easeInOut;
-      
-      // Arc motion - lift up in the middle
-      const arcHeight = 1.5;
-      const arc = Math.sin(t * Math.PI) * arcHeight;
-      
-      targetPos = new THREE.Vector3(currentX, arc, 0);
-      
-      // Call completion callback when done
-      if (t >= 1 && onAnimationComplete) {
-        onAnimationComplete();
-      }
-    } else {
-      // Normal position
-      targetPos = new THREE.Vector3(...basePosition);
-    }
-
-    // Smooth lerp to target
-    const lerpSpeed = isDragging ? 0.3 : 0.15;
-    currentPosition.current.lerp(targetPos, lerpSpeed);
-    
-    groupRef.current.position.copy(currentPosition.current);
-  });
-
-  return (
-    <group
-      ref={(g) => {
-        groupRef.current = g;
-        if (typeof ref === "function") ref(g);
-        else if (ref) ref.current = g;
-      }}
-    >
-      <mesh
-        castShadow
-        receiveShadow
-        position={[0, size[1] / 2, 0]}
-        onClick={onClick}
-      >
-        <boxGeometry args={
-          isDragging || isAnimating 
-            ? [size[0] * 1.1, size[1] * 1.1, size[2] * 1.1] 
-            : size
-        } />
-        <meshStandardMaterial
-          color={getColor()}
-          emissive={
-            isDragging ? "#f97316" 
-            : isSwapTarget ? "#4ade80" 
-            : isAnimating ? "#a78bfa"
-            : selected ? "#fbbf24" 
-            : "#000000"
-          }
-          emissiveIntensity={isDragging || isAnimating ? 0.6 : isSwapTarget ? 0.5 : selected ? 0.4 : 0}
-          transparent={isOtherDragging}
-          opacity={isOtherDragging ? 0.5 : 1}
-        />
-      </mesh>
-
-      <Text
-        position={[0, size[1] / 2 + 0.15, size[2] / 2 + 0.01]}
-        fontSize={0.4}
-        color="white"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {String(value)}
-      </Text>
-
-      <Text
-        position={[0, -0.3, size[2] / 2 + 0.01]}
-        fontSize={0.3}
-        color={
-          isDragging ? "#f97316" 
-          : isSwapTarget ? "#4ade80" 
-          : isAnimating ? "#a78bfa"
-          : "yellow"
-        }
-        anchorX="center"
-        anchorY="middle"
-      >
-        [{index}]
-      </Text>
-
-      {selected && !isDragging && !isSwapTarget && !isAnimating && (
-        <Text
-          position={[0, size[1] + 0.8, 0]}
-          fontSize={0.3}
-          color="#fde68a"
-          anchorX="center"
-          anchorY="middle"
-        >
-          Value {value} at index {index}
-        </Text>
-      )}
-
-      {isDragging && (
-        <Text
-          position={[0, size[1] + 1, 0]}
-          fontSize={0.3}
-          color="#f97316"
-          anchorX="center"
-          anchorY="middle"
-        >
-          ✋ Dragging
-        </Text>
-      )}
-
-      {isSwapTarget && (
-        <Text
-          position={[0, size[1] + 1, 0]}
-          fontSize={0.3}
-          color="#4ade80"
-          anchorX="center"
-          anchorY="middle"
-        >
-          🔄 Swap here
-        </Text>
-      )}
-
-      {isAnimating && (
-        <Text
-          position={[0, size[1] + 1, 0]}
-          fontSize={0.3}
-          color="#a78bfa"
-          anchorX="center"
-          anchorY="middle"
-        >
-          ✨ Moving...
-        </Text>
-      )}
-    </group>
-  );
-});
 
 // === Fade-in Text ===
 const FadeInText = ({ show, text, position, fontSize, color }) => {
