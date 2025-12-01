@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
@@ -9,6 +9,7 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
   const [page, setPage] = useState(0);
   const [selectedBox, setSelectedBox] = useState(null);
   const [draggedBox, setDraggedBox] = useState(null);
+  const [holdingBox, setHoldingBox] = useState(null);
   const [boxPositions, setBoxPositions] = useState(() => {
     const mid = (initialData.length - 1) / 2;
     return initialData.map((_, i) => [(i - mid) * spacing, 0, 0]);
@@ -30,13 +31,23 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
     setSelectedBox((prev) => (prev === i ? null : i));
   };
 
-  const handleDragStart = (index) => {
+  const handleHoldStart = (index) => {
+    setHoldingBox(index);
+  };
+
+  const handleHoldComplete = (index) => {
     setDraggedBox(index);
     setSelectedBox(index);
+    setHoldingBox(null);
+  };
+
+  const handleHoldCancel = () => {
+    setHoldingBox(null);
   };
 
   const handleDragEnd = () => {
     setDraggedBox(null);
+    setHoldingBox(null);
   };
 
   const updateBoxPosition = (index, newPosition) => {
@@ -59,8 +70,25 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
   };
 
   return (
-    <div className="w-full h-[500px] relative">
-      <Canvas camera={{ position: [0, 6, 14], fov: 50 }}>
+    <div 
+      className="w-full h-[500px] relative"
+      style={{
+        WebkitTouchCallout: 'none',
+        WebkitUserSelect: 'none',
+        KhtmlUserSelect: 'none',
+        MozUserSelect: 'none',
+        msUserSelect: 'none',
+        userSelect: 'none',
+        touchAction: 'none',
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <Canvas 
+        camera={{ position: [0, 6, 14], fov: 50 }}
+        style={{
+          touchAction: 'none',
+        }}
+      >
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
         <pointLight position={[-5, 5, 5]} intensity={0.3} />
@@ -104,10 +132,13 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
             position={boxPositions[i]}
             selected={selectedBox === i}
             isDragging={draggedBox === i}
+            isHolding={holdingBox === i}
             anyDragging={draggedBox !== null}
             onValueClick={() => handleBoxClick(i)}
             onIndexClick={handleIndexClick}
-            onDragStart={() => handleDragStart(i)}
+            onHoldStart={() => handleHoldStart(i)}
+            onHoldComplete={() => handleHoldComplete(i)}
+            onHoldCancel={handleHoldCancel}
             onDragEnd={handleDragEnd}
             onPositionChange={(pos) => updateBoxPosition(i, pos)}
             controlsRef={controlsRef}
@@ -127,7 +158,7 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
         <OrbitControls 
           ref={controlsRef}
           makeDefault 
-          enabled={draggedBox === null}
+          enabled={draggedBox === null && holdingBox === null}
         />
       </Canvas>
     </div>
@@ -179,6 +210,40 @@ const DropZone = ({ position, index, isActive, onDrop }) => {
   );
 };
 
+// === Hold Progress Indicator ===
+const HoldProgressRing = ({ progress, position }) => {
+  const ringRef = useRef();
+  
+  useFrame(() => {
+    if (ringRef.current) {
+      ringRef.current.material.dashSize = progress * 6.28;
+      ringRef.current.material.gapSize = (1 - progress) * 6.28;
+    }
+  });
+
+  return (
+    <group position={position}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.9, 1.1, 32]} />
+        <meshBasicMaterial 
+          color="#f97316" 
+          transparent 
+          opacity={0.8}
+        />
+      </mesh>
+      <Text
+        position={[0, 0.5, 0]}
+        fontSize={0.25}
+        color="#f97316"
+        anchorX="center"
+        anchorY="middle"
+      >
+        Hold...
+      </Text>
+    </group>
+  );
+};
+
 // === Draggable Box ===
 const DraggableBox = ({
   index,
@@ -186,10 +251,13 @@ const DraggableBox = ({
   position,
   selected,
   isDragging,
+  isHolding,
   anyDragging,
   onValueClick,
   onIndexClick,
-  onDragStart,
+  onHoldStart,
+  onHoldComplete,
+  onHoldCancel,
   onDragEnd,
   onPositionChange,
   controlsRef,
@@ -197,15 +265,21 @@ const DraggableBox = ({
   const groupRef = useRef();
   const { camera, gl, raycaster, pointer } = useThree();
   const [isHovered, setIsHovered] = useState(false);
-  const [isPointerDown, setIsPointerDown] = useState(false);
+  const [holdProgress, setHoldProgress] = useState(0);
+  const holdTimerRef = useRef(null);
+  const holdStartTimeRef = useRef(null);
+  const isPointerDownRef = useRef(false);
   const dragPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const offset = useRef(new THREE.Vector3());
   const intersection = useRef(new THREE.Vector3());
+
+  const HOLD_DURATION = 1000; // 1 second
 
   const size = [1.6, 1.2, 1];
   
   const getColor = () => {
     if (isDragging) return "#f97316";
+    if (isHolding) return "#fb923c";
     if (selected) return "#facc15";
     if (isHovered) return "#818cf8";
     return index % 2 === 0 ? "#60a5fa" : "#34d399";
@@ -213,10 +287,9 @@ const DraggableBox = ({
 
   useFrame(() => {
     if (groupRef.current) {
-      const targetY = isDragging ? 1.5 : 0;
+      const targetY = isDragging ? 1.5 : isHolding ? 0.3 : 0;
       
       if (isDragging) {
-        // Direct position update when dragging - no lerp for X and Z
         groupRef.current.position.x = position[0];
         groupRef.current.position.z = position[2];
         groupRef.current.position.y = THREE.MathUtils.lerp(
@@ -225,7 +298,6 @@ const DraggableBox = ({
           0.3
         );
       } else {
-        // Smooth interpolation when not dragging
         groupRef.current.position.y = THREE.MathUtils.lerp(
           groupRef.current.position.y,
           position[1] + targetY,
@@ -243,40 +315,91 @@ const DraggableBox = ({
         );
       }
 
-      const targetScale = isDragging ? 1.15 : isHovered ? 1.05 : 1;
+      const targetScale = isDragging ? 1.15 : isHolding ? 1.1 : isHovered ? 1.05 : 1;
       groupRef.current.scale.lerp(
         new THREE.Vector3(targetScale, targetScale, targetScale),
         0.1
       );
     }
+
+    // Update hold progress
+    if (isHolding && holdStartTimeRef.current) {
+      const elapsed = Date.now() - holdStartTimeRef.current;
+      const progress = Math.min(elapsed / HOLD_DURATION, 1);
+      setHoldProgress(progress);
+      
+      if (progress >= 1) {
+        completeHold();
+      }
+    }
   });
 
-  const handlePointerDown = (e) => {
+  const startHold = (e) => {
     e.stopPropagation();
-    setIsPointerDown(true);
     
-    // Disable orbit controls immediately
     if (controlsRef.current) {
       controlsRef.current.enabled = false;
     }
     
-    // Use horizontal plane for dragging (Y = 0)
-    dragPlane.current.set(new THREE.Vector3(0, 1, 0), -groupRef.current.position.y);
+    isPointerDownRef.current = true;
+    holdStartTimeRef.current = Date.now();
+    setHoldProgress(0);
+    onHoldStart();
+    
+    gl.domElement.style.cursor = "progress";
+  };
 
+  const completeHold = () => {
+    if (!isPointerDownRef.current) return;
+    
+    holdStartTimeRef.current = null;
+    setHoldProgress(0);
+    
+    // Setup drag plane
+    dragPlane.current.set(new THREE.Vector3(0, 1, 0), -groupRef.current.position.y);
+    
     raycaster.setFromCamera(pointer, camera);
     raycaster.ray.intersectPlane(dragPlane.current, intersection.current);
     offset.current.copy(intersection.current).sub(groupRef.current.position);
-
-    onDragStart();
-    gl.domElement.style.cursor = "grabbing";
     
-    // Capture pointer to track movement outside the object
+    onHoldComplete();
+    gl.domElement.style.cursor = "grabbing";
+  };
+
+  const cancelHold = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    holdStartTimeRef.current = null;
+    setHoldProgress(0);
+    isPointerDownRef.current = false;
+    onHoldCancel();
+    
+    if (controlsRef.current) {
+      controlsRef.current.enabled = true;
+    }
+    
+    gl.domElement.style.cursor = "auto";
+  };
+
+  const handlePointerDown = (e) => {
+    e.stopPropagation();
     e.target.setPointerCapture(e.pointerId);
+    startHold(e);
   };
 
   const handlePointerMove = (e) => {
-    if (!isDragging || !isPointerDown) return;
+    if (!isPointerDownRef.current) return;
     e.stopPropagation();
+
+    // If still holding (not yet dragging), check if moved too much
+    if (isHolding && !isDragging) {
+      // Cancel if moved significantly during hold
+      return;
+    }
+
+    if (!isDragging) return;
 
     raycaster.setFromCamera(pointer, camera);
     raycaster.ray.intersectPlane(dragPlane.current, intersection.current);
@@ -291,22 +414,29 @@ const DraggableBox = ({
   };
 
   const handlePointerUp = (e) => {
-    if (isPointerDown) {
-      e.stopPropagation();
-      setIsPointerDown(false);
-      onDragEnd();
-      gl.domElement.style.cursor = "auto";
-      
-      // Re-enable orbit controls
-      if (controlsRef.current) {
-        controlsRef.current.enabled = true;
-      }
-      
-      // Release pointer capture
-      if (e.target.releasePointerCapture) {
+    e.stopPropagation();
+    
+    if (e.target.releasePointerCapture) {
+      try {
         e.target.releasePointerCapture(e.pointerId);
-      }
+      } catch (err) {}
     }
+
+    if (isDragging) {
+      onDragEnd();
+    } else {
+      cancelHold();
+    }
+    
+    isPointerDownRef.current = false;
+    holdStartTimeRef.current = null;
+    setHoldProgress(0);
+    
+    if (controlsRef.current) {
+      controlsRef.current.enabled = true;
+    }
+    
+    gl.domElement.style.cursor = "auto";
   };
 
   return (
@@ -319,13 +449,45 @@ const DraggableBox = ({
       }}
       onPointerOut={() => {
         setIsHovered(false);
-        if (!anyDragging) gl.domElement.style.cursor = "auto";
+        if (!anyDragging && !isHolding) gl.domElement.style.cursor = "auto";
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
+      {/* Hold Progress Ring */}
+      {isHolding && !isDragging && (
+        <group position={[0, size[1] + 1.2, 0]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.4, 0.55, 32]} />
+            <meshBasicMaterial color="#374151" transparent opacity={0.5} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry 
+              args={[
+                0.4, 
+                0.55, 
+                32, 
+                1, 
+                0, 
+                Math.PI * 2 * holdProgress
+              ]} 
+            />
+            <meshBasicMaterial color="#f97316" />
+          </mesh>
+          <Text
+            position={[0, 0.4, 0]}
+            fontSize={0.2}
+            color="#f97316"
+            anchorX="center"
+            anchorY="middle"
+          >
+            {Math.ceil((1 - holdProgress) * (HOLD_DURATION / 1000))}s
+          </Text>
+        </group>
+      )}
+
       {/* Shadow when dragging */}
       {isDragging && (
         <mesh position={[0, -1.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -339,8 +501,8 @@ const DraggableBox = ({
         <boxGeometry args={size} />
         <meshStandardMaterial
           color={getColor()}
-          emissive={isDragging ? "#f97316" : selected ? "#fbbf24" : "#000000"}
-          emissiveIntensity={isDragging ? 0.5 : selected ? 0.4 : 0}
+          emissive={isDragging ? "#f97316" : isHolding ? "#fb923c" : selected ? "#fbbf24" : "#000000"}
+          emissiveIntensity={isDragging ? 0.5 : isHolding ? 0.3 : selected ? 0.4 : 0}
           metalness={0.1}
           roughness={0.5}
         />
@@ -351,6 +513,14 @@ const DraggableBox = ({
         <mesh position={[0, size[1] / 2, 0]}>
           <boxGeometry args={[size[0] + 0.1, size[1] + 0.1, size[2] + 0.1]} />
           <meshBasicMaterial color="#ffffff" wireframe />
+        </mesh>
+      )}
+
+      {/* Pulsing outline when holding */}
+      {isHolding && !isDragging && (
+        <mesh position={[0, size[1] / 2, 0]}>
+          <boxGeometry args={[size[0] + 0.08, size[1] + 0.08, size[2] + 0.08]} />
+          <meshBasicMaterial color="#f97316" wireframe />
         </mesh>
       )}
 
@@ -379,7 +549,7 @@ const DraggableBox = ({
       </Text>
 
       {/* Status label */}
-      {(selected || isDragging) && (
+      {(selected || isDragging) && !isHolding && (
         <Text
           position={[0, size[1] + 0.9, 0]}
           fontSize={0.28}
