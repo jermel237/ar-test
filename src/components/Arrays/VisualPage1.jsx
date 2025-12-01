@@ -130,7 +130,7 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
             isDragging={draggedBox === i}
             isHolding={holdingBox === i}
             anyDragging={draggedBox !== null}
-            onValueClick={() => handleBoxClick(i)}
+            onBoxClick={() => handleBoxClick(i)}
             onIndexClick={handleIndexClick}
             onHoldStart={() => handleHoldStart(i)}
             onHoldComplete={() => handleHoldComplete(i)}
@@ -212,7 +212,7 @@ const DraggableBox = ({
   isDragging,
   isHolding,
   anyDragging,
-  onValueClick,
+  onBoxClick,
   onIndexClick,
   onHoldStart,
   onHoldComplete,
@@ -227,11 +227,14 @@ const DraggableBox = ({
   const [holdProgress, setHoldProgress] = useState(0);
   const holdStartTimeRef = useRef(null);
   const isPointerDownRef = useRef(false);
+  const pointerStartPosRef = useRef({ x: 0, y: 0 });
+  const hasDraggedRef = useRef(false);
   const dragPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const offset = useRef(new THREE.Vector3());
   const intersection = useRef(new THREE.Vector3());
 
   const HOLD_DURATION = 500; // 0.5 seconds
+  const CLICK_THRESHOLD = 5; // pixels - if moved less than this, it's a click
 
   const size = [1.6, 1.2, 1];
   
@@ -280,7 +283,8 @@ const DraggableBox = ({
       );
     }
 
-    if (isHolding && holdStartTimeRef.current) {
+    // Update hold progress
+    if (isHolding && holdStartTimeRef.current && !isDragging) {
       const elapsed = Date.now() - holdStartTimeRef.current;
       const progress = Math.min(elapsed / HOLD_DURATION, 1);
       setHoldProgress(progress);
@@ -292,14 +296,14 @@ const DraggableBox = ({
   });
 
   const startHold = (e) => {
-    e.stopPropagation();
-    
     if (controlsRef.current) {
       controlsRef.current.enabled = false;
     }
     
     isPointerDownRef.current = true;
+    hasDraggedRef.current = false;
     holdStartTimeRef.current = Date.now();
+    pointerStartPosRef.current = { x: e.clientX || 0, y: e.clientY || 0 };
     setHoldProgress(0);
     onHoldStart();
     
@@ -309,6 +313,7 @@ const DraggableBox = ({
   const completeHold = () => {
     if (!isPointerDownRef.current) return;
     
+    hasDraggedRef.current = true;
     holdStartTimeRef.current = null;
     setHoldProgress(0);
     
@@ -337,17 +342,15 @@ const DraggableBox = ({
 
   const handlePointerDown = (e) => {
     e.stopPropagation();
-    e.target.setPointerCapture(e.pointerId);
+    try {
+      e.target.setPointerCapture(e.pointerId);
+    } catch (err) {}
     startHold(e);
   };
 
   const handlePointerMove = (e) => {
     if (!isPointerDownRef.current) return;
     e.stopPropagation();
-
-    if (isHolding && !isDragging) {
-      return;
-    }
 
     if (!isDragging) return;
 
@@ -366,10 +369,21 @@ const DraggableBox = ({
   const handlePointerUp = (e) => {
     e.stopPropagation();
     
-    if (e.target.releasePointerCapture) {
-      try {
+    try {
+      if (e.target.releasePointerCapture) {
         e.target.releasePointerCapture(e.pointerId);
-      } catch (err) {}
+      }
+    } catch (err) {}
+
+    const endPos = { x: e.clientX || 0, y: e.clientY || 0 };
+    const distance = Math.sqrt(
+      Math.pow(endPos.x - pointerStartPosRef.current.x, 2) +
+      Math.pow(endPos.y - pointerStartPosRef.current.y, 2)
+    );
+
+    // If it was a quick tap (not a hold that completed) and didn't move much, treat as click
+    if (!hasDraggedRef.current && distance < CLICK_THRESHOLD) {
+      onBoxClick();
     }
 
     if (isDragging) {
@@ -379,6 +393,7 @@ const DraggableBox = ({
     }
     
     isPointerDownRef.current = false;
+    hasDraggedRef.current = false;
     holdStartTimeRef.current = null;
     setHoldProgress(0);
     
@@ -406,6 +421,7 @@ const DraggableBox = ({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
+      {/* Hold Progress Ring */}
       {isHolding && !isDragging && (
         <group position={[0, size[1] + 1.2, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -428,6 +444,7 @@ const DraggableBox = ({
         </group>
       )}
 
+      {/* Shadow when dragging */}
       {isDragging && (
         <mesh position={[0, -1.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <circleGeometry args={[0.8, 32]} />
@@ -435,6 +452,7 @@ const DraggableBox = ({
         </mesh>
       )}
 
+      {/* Main Box */}
       <mesh castShadow receiveShadow position={[0, size[1] / 2, 0]}>
         <boxGeometry args={size} />
         <meshStandardMaterial
@@ -446,6 +464,7 @@ const DraggableBox = ({
         />
       </mesh>
 
+      {/* Outline effect when dragging */}
       {isDragging && (
         <mesh position={[0, size[1] / 2, 0]}>
           <boxGeometry args={[size[0] + 0.1, size[1] + 0.1, size[2] + 0.1]} />
@@ -453,6 +472,7 @@ const DraggableBox = ({
         </mesh>
       )}
 
+      {/* Pulsing outline when holding */}
       {isHolding && !isDragging && (
         <mesh position={[0, size[1] / 2, 0]}>
           <boxGeometry args={[size[0] + 0.08, size[1] + 0.08, size[2] + 0.08]} />
@@ -460,6 +480,7 @@ const DraggableBox = ({
         </mesh>
       )}
 
+      {/* Value label on box */}
       <FadeInText
         show={true}
         text={String(value)}
@@ -468,6 +489,7 @@ const DraggableBox = ({
         color="white"
       />
 
+      {/* Index clickable */}
       <Text
         position={[0, -0.3, size[2] / 2 + 0.01]}
         fontSize={0.3}
@@ -482,6 +504,7 @@ const DraggableBox = ({
         [{index}]
       </Text>
 
+      {/* Selected/Dragging status label */}
       {(selected || isDragging) && !isHolding && (
         <Text
           position={[0, size[1] + 0.9, 0]}
