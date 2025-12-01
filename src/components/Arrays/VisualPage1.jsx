@@ -93,7 +93,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
         <pointLight position={[-5, 5, 5]} intensity={0.3} />
 
-        {/* Header */}
         <FadeInText
           show={true}
           text={"Array Data Structure"}
@@ -102,13 +101,11 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
           color="white"
         />
 
-        {/* Ground Plane */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} receiveShadow>
           <planeGeometry args={[20, 10]} />
           <meshStandardMaterial color="#1e293b" transparent opacity={0.5} />
         </mesh>
 
-        {/* Drop Zone Indicators */}
         {data.map((_, i) => {
           const mid = (data.length - 1) / 2;
           const originalX = (i - mid) * spacing;
@@ -123,7 +120,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
           );
         })}
 
-        {/* Boxes */}
         {data.map((value, i) => (
           <DraggableBox
             key={i}
@@ -145,7 +141,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
           />
         ))}
 
-        {/* Side Panel */}
         {showPanel && (
           <DefinitionPanel
             page={page}
@@ -165,7 +160,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
   );
 };
 
-// === Drop Zone ===
 const DropZone = ({ position, index, isActive, onDrop }) => {
   const [hovered, setHovered] = useState(false);
   const meshRef = useRef();
@@ -210,41 +204,6 @@ const DropZone = ({ position, index, isActive, onDrop }) => {
   );
 };
 
-// === Hold Progress Indicator ===
-const HoldProgressRing = ({ progress, position }) => {
-  const ringRef = useRef();
-  
-  useFrame(() => {
-    if (ringRef.current) {
-      ringRef.current.material.dashSize = progress * 6.28;
-      ringRef.current.material.gapSize = (1 - progress) * 6.28;
-    }
-  });
-
-  return (
-    <group position={position}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.9, 1.1, 32]} />
-        <meshBasicMaterial 
-          color="#f97316" 
-          transparent 
-          opacity={0.8}
-        />
-      </mesh>
-      <Text
-        position={[0, 0.5, 0]}
-        fontSize={0.25}
-        color="#f97316"
-        anchorX="center"
-        anchorY="middle"
-      >
-        Hold...
-      </Text>
-    </group>
-  );
-};
-
-// === Draggable Box ===
 const DraggableBox = ({
   index,
   value,
@@ -266,14 +225,13 @@ const DraggableBox = ({
   const { camera, gl, raycaster, pointer } = useThree();
   const [isHovered, setIsHovered] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
-  const holdTimerRef = useRef(null);
   const holdStartTimeRef = useRef(null);
   const isPointerDownRef = useRef(false);
   const dragPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const offset = useRef(new THREE.Vector3());
   const intersection = useRef(new THREE.Vector3());
 
-  const HOLD_DURATION = 1000; // 1 second
+  const HOLD_DURATION = 500; // 0.5 seconds
 
   const size = [1.6, 1.2, 1];
   
@@ -322,7 +280,6 @@ const DraggableBox = ({
       );
     }
 
-    // Update hold progress
     if (isHolding && holdStartTimeRef.current) {
       const elapsed = Date.now() - holdStartTimeRef.current;
       const progress = Math.min(elapsed / HOLD_DURATION, 1);
@@ -355,7 +312,6 @@ const DraggableBox = ({
     holdStartTimeRef.current = null;
     setHoldProgress(0);
     
-    // Setup drag plane
     dragPlane.current.set(new THREE.Vector3(0, 1, 0), -groupRef.current.position.y);
     
     raycaster.setFromCamera(pointer, camera);
@@ -367,10 +323,6 @@ const DraggableBox = ({
   };
 
   const cancelHold = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
     holdStartTimeRef.current = null;
     setHoldProgress(0);
     isPointerDownRef.current = false;
@@ -393,9 +345,7 @@ const DraggableBox = ({
     if (!isPointerDownRef.current) return;
     e.stopPropagation();
 
-    // If still holding (not yet dragging), check if moved too much
     if (isHolding && !isDragging) {
-      // Cancel if moved significantly during hold
       return;
     }
 
@@ -456,7 +406,6 @@ const DraggableBox = ({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* Hold Progress Ring */}
       {isHolding && !isDragging && (
         <group position={[0, size[1] + 1.2, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -476,19 +425,9 @@ const DraggableBox = ({
             />
             <meshBasicMaterial color="#f97316" />
           </mesh>
-          <Text
-            position={[0, 0.4, 0]}
-            fontSize={0.2}
-            color="#f97316"
-            anchorX="center"
-            anchorY="middle"
-          >
-            {Math.ceil((1 - holdProgress) * (HOLD_DURATION / 1000))}s
-          </Text>
         </group>
       )}
 
-      {/* Shadow when dragging */}
       {isDragging && (
         <mesh position={[0, -1.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <circleGeometry args={[0.8, 32]} />
@@ -496,7 +435,6 @@ const DraggableBox = ({
         </mesh>
       )}
 
-      {/* Main Box */}
       <mesh castShadow receiveShadow position={[0, size[1] / 2, 0]}>
         <boxGeometry args={size} />
         <meshStandardMaterial
@@ -508,7 +446,6 @@ const DraggableBox = ({
         />
       </mesh>
 
-      {/* Outline effect when dragging */}
       {isDragging && (
         <mesh position={[0, size[1] / 2, 0]}>
           <boxGeometry args={[size[0] + 0.1, size[1] + 0.1, size[2] + 0.1]} />
@@ -516,7 +453,6 @@ const DraggableBox = ({
         </mesh>
       )}
 
-      {/* Pulsing outline when holding */}
       {isHolding && !isDragging && (
         <mesh position={[0, size[1] / 2, 0]}>
           <boxGeometry args={[size[0] + 0.08, size[1] + 0.08, size[2] + 0.08]} />
@@ -524,7 +460,6 @@ const DraggableBox = ({
         </mesh>
       )}
 
-      {/* Value label */}
       <FadeInText
         show={true}
         text={String(value)}
@@ -533,7 +468,6 @@ const DraggableBox = ({
         color="white"
       />
 
-      {/* Index clickable */}
       <Text
         position={[0, -0.3, size[2] / 2 + 0.01]}
         fontSize={0.3}
@@ -548,7 +482,6 @@ const DraggableBox = ({
         [{index}]
       </Text>
 
-      {/* Status label */}
       {(selected || isDragging) && !isHolding && (
         <Text
           position={[0, size[1] + 0.9, 0]}
@@ -564,7 +497,6 @@ const DraggableBox = ({
   );
 };
 
-// === Fade-in Text ===
 const FadeInText = ({ show, text, position, fontSize, color }) => {
   const ref = useRef();
   const opacity = useRef(0);
@@ -601,7 +533,6 @@ const FadeInText = ({ show, text, position, fontSize, color }) => {
   );
 };
 
-// === Definition Panel ===
 const DefinitionPanel = ({ page, data, position, onNextClick }) => {
   let content = "";
 
