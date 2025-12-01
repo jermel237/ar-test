@@ -45,20 +45,17 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
     });
   };
 
-  // Reset positions to original
   const resetPositions = () => {
     const mid = (data.length - 1) / 2;
     setBoxPositions(data.map((_, i) => [(i - mid) * spacing, 0, 0]));
   };
 
-  // Swap elements based on drop position
   const handleSwap = (draggedIndex, targetIndex) => {
     if (draggedIndex !== targetIndex) {
       const newData = [...data];
       [newData[draggedIndex], newData[targetIndex]] = [newData[targetIndex], newData[draggedIndex]];
       setData(newData);
       
-      // Reset positions after swap
       const mid = (newData.length - 1) / 2;
       setBoxPositions(newData.map((_, i) => [(i - mid) * spacing, 0, 0]));
     }
@@ -74,11 +71,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
         Reset Positions
       </button>
 
-      {/* Instructions */}
-      <div className="absolute top-4 left-4 z-10 bg-black/50 text-white px-4 py-2 rounded-lg text-sm">
-        🖱️ Click & drag boxes to move them | Click index for info
-      </div>
-
       <Canvas camera={{ position: [0, 6, 14], fov: 50 }}>
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
@@ -87,13 +79,13 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
         {/* Header */}
         <FadeInText
           show={true}
-          text={"Array Data Structure - Drag & Drop"}
+          text={"Array Data Structure"}
           position={[0, 4, 0]}
           fontSize={0.6}
           color="white"
         />
 
-        {/* Ground Plane for visual reference */}
+        {/* Ground Plane */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} receiveShadow>
           <planeGeometry args={[20, 10]} />
           <meshStandardMaterial color="#1e293b" transparent opacity={0.5} />
@@ -144,7 +136,9 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
         <OrbitControls 
           makeDefault 
           enabled={draggedBox === null}
+          enableRotate={draggedBox === null}
           enablePan={draggedBox === null}
+          enableZoom={draggedBox === null}
         />
       </Canvas>
     </div>
@@ -218,17 +212,15 @@ const DraggableBox = ({
 
   const size = [1.6, 1.2, 1];
   
-  // Dynamic color based on state
   const getColor = () => {
-    if (isDragging) return "#f97316"; // Orange when dragging
-    if (selected) return "#facc15"; // Yellow when selected
-    if (isHovered) return "#818cf8"; // Purple when hovered
-    return index % 2 === 0 ? "#60a5fa" : "#34d399"; // Default alternating colors
+    if (isDragging) return "#f97316";
+    if (selected) return "#facc15";
+    if (isHovered) return "#818cf8";
+    return index % 2 === 0 ? "#60a5fa" : "#34d399";
   };
 
   useFrame(() => {
     if (groupRef.current) {
-      // Smooth position interpolation
       const targetY = isDragging ? 1.5 : 0;
       groupRef.current.position.y = THREE.MathUtils.lerp(
         groupRef.current.position.y,
@@ -246,30 +238,24 @@ const DraggableBox = ({
         0.15
       );
 
-      // Scale effect
       const targetScale = isDragging ? 1.15 : isHovered ? 1.05 : 1;
       groupRef.current.scale.lerp(
         new THREE.Vector3(targetScale, targetScale, targetScale),
         0.1
       );
 
-      // Rotation effect when dragging
-      if (isDragging) {
-        groupRef.current.rotation.y = Math.sin(Date.now() * 0.003) * 0.1;
-      } else {
-        groupRef.current.rotation.y = THREE.MathUtils.lerp(
-          groupRef.current.rotation.y,
-          0,
-          0.1
-        );
-      }
+      // Keep rotation at 0 - no spinning
+      groupRef.current.rotation.y = THREE.MathUtils.lerp(
+        groupRef.current.rotation.y,
+        0,
+        0.1
+      );
     }
   });
 
   const handlePointerDown = (e) => {
     e.stopPropagation();
     
-    // Set up drag plane perpendicular to camera
     const cameraDirection = new THREE.Vector3();
     camera.getWorldDirection(cameraDirection);
     dragPlane.current.setFromNormalAndCoplanarPoint(
@@ -277,7 +263,6 @@ const DraggableBox = ({
       groupRef.current.position
     );
 
-    // Calculate offset
     raycaster.setFromCamera(pointer, camera);
     raycaster.ray.intersectPlane(dragPlane.current, intersection.current);
     offset.current.copy(intersection.current).sub(groupRef.current.position);
@@ -295,7 +280,7 @@ const DraggableBox = ({
 
     const newPosition = [
       intersection.current.x - offset.current.x,
-      0, // Keep Y at 0 for the base position
+      0,
       intersection.current.z - offset.current.z,
     ];
 
@@ -388,20 +373,7 @@ const DraggableBox = ({
           anchorX="center"
           anchorY="middle"
         >
-          {isDragging ? "🔄 Dragging..." : `Value ${value} at index ${index}`}
-        </Text>
-      )}
-
-      {/* Drag instruction on hover */}
-      {isHovered && !isDragging && !selected && (
-        <Text
-          position={[0, size[1] + 0.7, 0]}
-          fontSize={0.22}
-          color="#94a3b8"
-          anchorX="center"
-          anchorY="middle"
-        >
-          Hold to drag
+          {isDragging ? "Dragging..." : `Value ${value} at index ${index}`}
         </Text>
       )}
     </group>
@@ -455,7 +427,6 @@ const DefinitionPanel = ({ page, data, position, onNextClick }) => {
       "",
       "• Index is the position assigned to each element.",
       "• Starts at 0, so first element → index 0.",
-      "• Try dragging boxes to swap elements!",
     ].join("\n");
   } else if (page === 1) {
     content = [
@@ -463,7 +434,6 @@ const DefinitionPanel = ({ page, data, position, onNextClick }) => {
       "",
       "• Indexing gives O(1) access time.",
       "• Arrays are stored in contiguous memory.",
-      "• Swapping elements is O(1) operation.",
     ].join("\n");
   } else if (page === 2) {
     content = [
@@ -477,7 +447,6 @@ const DefinitionPanel = ({ page, data, position, onNextClick }) => {
 
   return (
     <group>
-      {/* Panel Background */}
       <mesh position={[position[0], position[1] - 0.5, position[2] - 0.1]}>
         <planeGeometry args={[6, 5]} />
         <meshBasicMaterial color="#1e293b" transparent opacity={0.85} />
