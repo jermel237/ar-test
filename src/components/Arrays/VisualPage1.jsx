@@ -14,6 +14,8 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
     return initialData.map((_, i) => [(i - mid) * spacing, 0, 0]);
   });
 
+  const controlsRef = useRef();
+
   const handleIndexClick = () => {
     setShowPanel((prev) => !prev);
     setPage(0);
@@ -45,11 +47,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
     });
   };
 
-  const resetPositions = () => {
-    const mid = (data.length - 1) / 2;
-    setBoxPositions(data.map((_, i) => [(i - mid) * spacing, 0, 0]));
-  };
-
   const handleSwap = (draggedIndex, targetIndex) => {
     if (draggedIndex !== targetIndex) {
       const newData = [...data];
@@ -63,14 +60,6 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
 
   return (
     <div className="w-full h-[500px] relative">
-      {/* Reset Button */}
-      <button
-        onClick={resetPositions}
-        className="absolute top-4 right-4 z-10 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg transition-all"
-      >
-        Reset Positions
-      </button>
-
       <Canvas camera={{ position: [0, 6, 14], fov: 50 }}>
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 10, 5]} intensity={0.8} />
@@ -115,11 +104,13 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
             position={boxPositions[i]}
             selected={selectedBox === i}
             isDragging={draggedBox === i}
+            anyDragging={draggedBox !== null}
             onValueClick={() => handleBoxClick(i)}
             onIndexClick={handleIndexClick}
             onDragStart={() => handleDragStart(i)}
             onDragEnd={handleDragEnd}
             onPositionChange={(pos) => updateBoxPosition(i, pos)}
+            controlsRef={controlsRef}
           />
         ))}
 
@@ -134,11 +125,9 @@ const VisualPage1 = ({ data: initialData = [10, 20, 30, 40], spacing = 2.0 }) =>
         )}
 
         <OrbitControls 
+          ref={controlsRef}
           makeDefault 
           enabled={draggedBox === null}
-          enableRotate={draggedBox === null}
-          enablePan={draggedBox === null}
-          enableZoom={draggedBox === null}
         />
       </Canvas>
     </div>
@@ -197,16 +186,19 @@ const DraggableBox = ({
   position,
   selected,
   isDragging,
+  anyDragging,
   onValueClick,
   onIndexClick,
   onDragStart,
   onDragEnd,
   onPositionChange,
+  controlsRef,
 }) => {
   const groupRef = useRef();
   const { camera, gl, raycaster, pointer } = useThree();
   const [isHovered, setIsHovered] = useState(false);
-  const dragPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0));
+  const [isPointerDown, setIsPointerDown] = useState(false);
+  const dragPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const offset = useRef(new THREE.Vector3());
   const intersection = useRef(new THREE.Vector3());
 
@@ -222,32 +214,38 @@ const DraggableBox = ({
   useFrame(() => {
     if (groupRef.current) {
       const targetY = isDragging ? 1.5 : 0;
-      groupRef.current.position.y = THREE.MathUtils.lerp(
-        groupRef.current.position.y,
-        position[1] + targetY,
-        0.15
-      );
-      groupRef.current.position.x = THREE.MathUtils.lerp(
-        groupRef.current.position.x,
-        position[0],
-        isDragging ? 1 : 0.15
-      );
-      groupRef.current.position.z = THREE.MathUtils.lerp(
-        groupRef.current.position.z,
-        position[2],
-        0.15
-      );
+      
+      if (isDragging) {
+        // Direct position update when dragging - no lerp for X and Z
+        groupRef.current.position.x = position[0];
+        groupRef.current.position.z = position[2];
+        groupRef.current.position.y = THREE.MathUtils.lerp(
+          groupRef.current.position.y,
+          position[1] + targetY,
+          0.3
+        );
+      } else {
+        // Smooth interpolation when not dragging
+        groupRef.current.position.y = THREE.MathUtils.lerp(
+          groupRef.current.position.y,
+          position[1] + targetY,
+          0.15
+        );
+        groupRef.current.position.x = THREE.MathUtils.lerp(
+          groupRef.current.position.x,
+          position[0],
+          0.15
+        );
+        groupRef.current.position.z = THREE.MathUtils.lerp(
+          groupRef.current.position.z,
+          position[2],
+          0.15
+        );
+      }
 
       const targetScale = isDragging ? 1.15 : isHovered ? 1.05 : 1;
       groupRef.current.scale.lerp(
         new THREE.Vector3(targetScale, targetScale, targetScale),
-        0.1
-      );
-
-      // Keep rotation at 0 - no spinning
-      groupRef.current.rotation.y = THREE.MathUtils.lerp(
-        groupRef.current.rotation.y,
-        0,
         0.1
       );
     }
@@ -255,13 +253,15 @@ const DraggableBox = ({
 
   const handlePointerDown = (e) => {
     e.stopPropagation();
+    setIsPointerDown(true);
     
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldDirection(cameraDirection);
-    dragPlane.current.setFromNormalAndCoplanarPoint(
-      cameraDirection.negate(),
-      groupRef.current.position
-    );
+    // Disable orbit controls immediately
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
+    
+    // Use horizontal plane for dragging (Y = 0)
+    dragPlane.current.set(new THREE.Vector3(0, 1, 0), -groupRef.current.position.y);
 
     raycaster.setFromCamera(pointer, camera);
     raycaster.ray.intersectPlane(dragPlane.current, intersection.current);
@@ -269,10 +269,13 @@ const DraggableBox = ({
 
     onDragStart();
     gl.domElement.style.cursor = "grabbing";
+    
+    // Capture pointer to track movement outside the object
+    e.target.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e) => {
-    if (!isDragging) return;
+    if (!isDragging || !isPointerDown) return;
     e.stopPropagation();
 
     raycaster.setFromCamera(pointer, camera);
@@ -288,10 +291,21 @@ const DraggableBox = ({
   };
 
   const handlePointerUp = (e) => {
-    if (isDragging) {
+    if (isPointerDown) {
       e.stopPropagation();
+      setIsPointerDown(false);
       onDragEnd();
       gl.domElement.style.cursor = "auto";
+      
+      // Re-enable orbit controls
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+      
+      // Release pointer capture
+      if (e.target.releasePointerCapture) {
+        e.target.releasePointerCapture(e.pointerId);
+      }
     }
   };
 
@@ -301,16 +315,16 @@ const DraggableBox = ({
       position={position}
       onPointerOver={() => {
         setIsHovered(true);
-        if (!isDragging) gl.domElement.style.cursor = "grab";
+        if (!anyDragging) gl.domElement.style.cursor = "grab";
       }}
       onPointerOut={() => {
         setIsHovered(false);
-        if (!isDragging) gl.domElement.style.cursor = "auto";
+        if (!anyDragging) gl.domElement.style.cursor = "auto";
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       {/* Shadow when dragging */}
       {isDragging && (
